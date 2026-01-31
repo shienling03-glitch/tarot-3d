@@ -16,8 +16,8 @@
     
     <!-- CDN资源引入 -->
     <script src="https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1620248357/camera_utils.min.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
     
     <style>
         /* ========== 全局样式 ========== */
@@ -980,7 +980,7 @@
         }
         
         // 重新开始
-        function restartReading() {
+        async function restartReading() {
             // 隐藏分析面板
             const panel = document.getElementById('analysis-panel');
             panel.classList.remove('show');
@@ -1013,12 +1013,11 @@
             // 重置选卡计数
             selectedCardsCount = 0;
             
-            // 重置所有卡牌状态
-            cards.forEach(card => {
-                card.userData.isFlipped = false;
-                card.userData.isSelected = false;
-                card.scale.set(1, 1, 1);
-            });
+            // 加载更多随机卡牌
+            await loadRandomCards(5);
+            
+            // 重新创建卡牌（使用新加载的图片）
+            recreateCards();
             
             // 重置其他状态
             selectedCard = null;
@@ -1028,7 +1027,19 @@
             canFlipCard = true;
             gestureEnabled = true;
             
-            console.log('✅ 已重新开始，无需重新加载页面');
+            console.log('✅ 已重新开始，加载了新卡牌');
+        }
+        
+        // 重新创建卡牌
+        function recreateCards() {
+            // 移除旧卡牌
+            cards.forEach(card => {
+                scene.remove(card);
+            });
+            cards = [];
+            
+            // 创建新卡牌
+            createCards();
         }
         
         // ========================================
@@ -1124,106 +1135,138 @@
         // ========================================
         // 卡牌加载模块
         // ========================================
-        async function loadCardImages() {
-            // 使用网络图片链接（Rider-Waite塔罗牌）
-            // 图片来源：sacred-texts.com 公开塔罗牌图片
-            const CARD_BASE_URL = 'https://www.sacred-texts.com/tarot/pkt/img';
+        
+        // 全局卡牌URL映射表
+        const ORIGINAL_BASE_URL = 'https://www.sacred-texts.com/tarot/pkt/img';
+        const proxyUrl = (imgName) => `/api/proxy?url=${encodeURIComponent(ORIGINAL_BASE_URL + '/' + imgName)}`;
+        
+        // 所有卡牌的映射
+        const ALL_CARD_URLS = {
+            '00_愚者_The_Fool.jpg': proxyUrl('ar00.jpg'),
+            '01_魔术师_The_Magician.jpg': proxyUrl('ar01.jpg'),
+            '02_女祭司_The_High_Priestess.jpg': proxyUrl('ar02.jpg'),
+            '03_皇后_The_Empress.jpg': proxyUrl('ar03.jpg'),
+            '04_皇帝_The_Emperor.jpg': proxyUrl('ar04.jpg'),
+            '05_教皇_The_Hierophant.jpg': proxyUrl('ar05.jpg'),
+            '06_恋人_The_Lovers.jpg': proxyUrl('ar06.jpg'),
+            '07_战车_The_Chariot.jpg': proxyUrl('ar07.jpg'),
+            '08_力量_Strength.jpg': proxyUrl('ar08.jpg'),
+            '09_隐士_The_Hermit.jpg': proxyUrl('ar09.jpg'),
+            '10_命运之轮_Wheel_of_Fortune.jpg': proxyUrl('ar10.jpg'),
+            '11_正义_Justice.jpg': proxyUrl('ar11.jpg'),
+            '12_倒吊人_The_Hanged_Man.jpg': proxyUrl('ar12.jpg'),
+            '13_死神_Death.jpg': proxyUrl('ar13.jpg'),
+            '14_节制_Temperance.jpg': proxyUrl('ar14.jpg'),
+            '15_恶魔_The_Devil.jpg': proxyUrl('ar15.jpg'),
+            '16_高塔_The_Tower.jpg': proxyUrl('ar16.jpg'),
+            '17_星星_The_Star.jpg': proxyUrl('ar17.jpg'),
+            '18_月亮_The_Moon.jpg': proxyUrl('ar18.jpg'),
+            '19_太阳_The_Sun.jpg': proxyUrl('ar19.jpg'),
+            '20_审判_Judgement.jpg': proxyUrl('ar20.jpg'),
+            '21_世界_The_World.jpg': proxyUrl('ar21.jpg'),
+            'wands_01_权杖王牌.jpg': proxyUrl('waac.jpg'),
+            'wands_02_权杖二.jpg': proxyUrl('wa02.jpg'),
+            'wands_03_权杖三.jpg': proxyUrl('wa03.jpg'),
+            'wands_04_权杖四.jpg': proxyUrl('wa04.jpg'),
+            'wands_05_权杖五.jpg': proxyUrl('wa05.jpg'),
+            'wands_06_权杖六.jpg': proxyUrl('wa06.jpg'),
+            'wands_07_权杖七.jpg': proxyUrl('wa07.jpg'),
+            'wands_08_权杖八.jpg': proxyUrl('wa08.jpg'),
+            'wands_09_权杖九.jpg': proxyUrl('wa09.jpg'),
+            'wands_10_权杖十.jpg': proxyUrl('wa10.jpg'),
+            'wands_11_权杖侍从.jpg': proxyUrl('wapa.jpg'),
+            'wands_12_权杖骑士.jpg': proxyUrl('wakn.jpg'),
+            'wands_13_权杖王后.jpg': proxyUrl('waqu.jpg'),
+            'wands_14_权杖国王.jpg': proxyUrl('waki.jpg'),
+            'cups_01_圣杯王牌.jpg': proxyUrl('cuac.jpg'),
+            'cups_02_圣杯二.jpg': proxyUrl('cu02.jpg'),
+            'cups_03_圣杯三.jpg': proxyUrl('cu03.jpg'),
+            'cups_04_圣杯四.jpg': proxyUrl('cu04.jpg'),
+            'cups_05_圣杯五.jpg': proxyUrl('cu05.jpg'),
+            'cups_06_圣杯六.jpg': proxyUrl('cu06.jpg'),
+            'cups_07_圣杯七.jpg': proxyUrl('cu07.jpg'),
+            'cups_08_圣杯八.jpg': proxyUrl('cu08.jpg'),
+            'cups_09_圣杯九.jpg': proxyUrl('cu09.jpg'),
+            'cups_10_圣杯十.jpg': proxyUrl('cu10.jpg'),
+            'cups_11_圣杯侍从.jpg': proxyUrl('cupa.jpg'),
+            'cups_12_圣杯骑士.jpg': proxyUrl('cukn.jpg'),
+            'cups_13_圣杯王后.jpg': proxyUrl('cuqu.jpg'),
+            'cups_14_圣杯国王.jpg': proxyUrl('cuki.jpg'),
+            'swords_01_宝剑王牌.jpg': proxyUrl('swac.jpg'),
+            'swords_02_宝剑二.jpg': proxyUrl('sw02.jpg'),
+            'swords_03_宝剑三.jpg': proxyUrl('sw03.jpg'),
+            'swords_04_宝剑四.jpg': proxyUrl('sw04.jpg'),
+            'swords_05_宝剑五.jpg': proxyUrl('sw05.jpg'),
+            'swords_06_宝剑六.jpg': proxyUrl('sw06.jpg'),
+            'swords_07_宝剑七.jpg': proxyUrl('sw07.jpg'),
+            'swords_08_宝剑八.jpg': proxyUrl('sw08.jpg'),
+            'swords_09_宝剑九.jpg': proxyUrl('sw09.jpg'),
+            'swords_10_宝剑十.jpg': proxyUrl('sw10.jpg'),
+            'swords_11_宝剑侍从.jpg': proxyUrl('swpa.jpg'),
+            'swords_12_宝剑骑士.jpg': proxyUrl('swkn.jpg'),
+            'swords_13_宝剑王后.jpg': proxyUrl('swqu.jpg'),
+            'swords_14_宝剑国王.jpg': proxyUrl('swki.jpg'),
+            'pents_01_星币王牌.jpg': proxyUrl('peac.jpg'),
+            'pents_02_星币二.jpg': proxyUrl('pe02.jpg'),
+            'pents_03_星币三.jpg': proxyUrl('pe03.jpg'),
+            'pents_04_星币四.jpg': proxyUrl('pe04.jpg'),
+            'pents_05_星币五.jpg': proxyUrl('pe05.jpg'),
+            'pents_06_星币六.jpg': proxyUrl('pe06.jpg'),
+            'pents_07_星币七.jpg': proxyUrl('pe07.jpg'),
+            'pents_08_星币八.jpg': proxyUrl('pe08.jpg'),
+            'pents_09_星币九.jpg': proxyUrl('pe09.jpg'),
+            'pents_10_星币十.jpg': proxyUrl('pe10.jpg'),
+            'pents_11_星币侍从.jpg': proxyUrl('pepa.jpg'),
+            'pents_12_星币骑士.jpg': proxyUrl('pekn.jpg'),
+            'pents_13_星币王后.jpg': proxyUrl('pequ.jpg'),
+            'pents_14_星币国王.jpg': proxyUrl('peki.jpg')
+        };
+        
+        // 已加载的卡牌文件名集合
+        let loadedCardFiles = new Set();
+        
+        // 随机选择n张未加载的卡牌
+        function getRandomUnloadedCards(count) {
+            const allFiles = Object.keys(ALL_CARD_URLS);
+            const unloaded = allFiles.filter(f => !loadedCardFiles.has(f));
             
-            // 网络图片映射：文件名 -> 网络URL
-            const imageUrls = {
-                '00_愚者_The_Fool.jpg': `${CARD_BASE_URL}/ar00.jpg`,
-                '01_魔术师_The_Magician.jpg': `${CARD_BASE_URL}/ar01.jpg`,
-                '02_女祭司_The_High_Priestess.jpg': `${CARD_BASE_URL}/ar02.jpg`,
-                '03_皇后_The_Empress.jpg': `${CARD_BASE_URL}/ar03.jpg`,
-                '04_皇帝_The_Emperor.jpg': `${CARD_BASE_URL}/ar04.jpg`,
-                '05_教皇_The_Hierophant.jpg': `${CARD_BASE_URL}/ar05.jpg`,
-                '06_恋人_The_Lovers.jpg': `${CARD_BASE_URL}/ar06.jpg`,
-                '07_战车_The_Chariot.jpg': `${CARD_BASE_URL}/ar07.jpg`,
-                '08_力量_Strength.jpg': `${CARD_BASE_URL}/ar08.jpg`,
-                '09_隐士_The_Hermit.jpg': `${CARD_BASE_URL}/ar09.jpg`,
-                '10_命运之轮_Wheel_of_Fortune.jpg': `${CARD_BASE_URL}/ar10.jpg`,
-                '11_正义_Justice.jpg': `${CARD_BASE_URL}/ar11.jpg`,
-                '12_倒吊人_The_Hanged_Man.jpg': `${CARD_BASE_URL}/ar12.jpg`,
-                '13_死神_Death.jpg': `${CARD_BASE_URL}/ar13.jpg`,
-                '14_节制_Temperance.jpg': `${CARD_BASE_URL}/ar14.jpg`,
-                '15_恶魔_The_Devil.jpg': `${CARD_BASE_URL}/ar15.jpg`,
-                '16_高塔_The_Tower.jpg': `${CARD_BASE_URL}/ar16.jpg`,
-                '17_星星_The_Star.jpg': `${CARD_BASE_URL}/ar17.jpg`,
-                '18_月亮_The_Moon.jpg': `${CARD_BASE_URL}/ar18.jpg`,
-                '19_太阳_The_Sun.jpg': `${CARD_BASE_URL}/ar19.jpg`,
-                '20_审判_Judgement.jpg': `${CARD_BASE_URL}/ar20.jpg`,
-                '21_世界_The_World.jpg': `${CARD_BASE_URL}/ar21.jpg`,
-                'wands_01_权杖王牌.jpg': `${CARD_BASE_URL}/waac.jpg`,
-                'wands_02_权杖二.jpg': `${CARD_BASE_URL}/wa02.jpg`,
-                'wands_03_权杖三.jpg': `${CARD_BASE_URL}/wa03.jpg`,
-                'wands_04_权杖四.jpg': `${CARD_BASE_URL}/wa04.jpg`,
-                'wands_05_权杖五.jpg': `${CARD_BASE_URL}/wa05.jpg`,
-                'wands_06_权杖六.jpg': `${CARD_BASE_URL}/wa06.jpg`,
-                'wands_07_权杖七.jpg': `${CARD_BASE_URL}/wa07.jpg`,
-                'wands_08_权杖八.jpg': `${CARD_BASE_URL}/wa08.jpg`,
-                'wands_09_权杖九.jpg': `${CARD_BASE_URL}/wa09.jpg`,
-                'wands_10_权杖十.jpg': `${CARD_BASE_URL}/wa10.jpg`,
-                'wands_11_权杖侍从.jpg': `${CARD_BASE_URL}/wapa.jpg`,
-                'wands_12_权杖骑士.jpg': `${CARD_BASE_URL}/wakn.jpg`,
-                'wands_13_权杖王后.jpg': `${CARD_BASE_URL}/waqu.jpg`,
-                'wands_14_权杖国王.jpg': `${CARD_BASE_URL}/waki.jpg`,
-                'cups_01_圣杯王牌.jpg': `${CARD_BASE_URL}/cuac.jpg`,
-                'cups_02_圣杯二.jpg': `${CARD_BASE_URL}/cu02.jpg`,
-                'cups_03_圣杯三.jpg': `${CARD_BASE_URL}/cu03.jpg`,
-                'cups_04_圣杯四.jpg': `${CARD_BASE_URL}/cu04.jpg`,
-                'cups_05_圣杯五.jpg': `${CARD_BASE_URL}/cu05.jpg`,
-                'cups_06_圣杯六.jpg': `${CARD_BASE_URL}/cu06.jpg`,
-                'cups_07_圣杯七.jpg': `${CARD_BASE_URL}/cu07.jpg`,
-                'cups_08_圣杯八.jpg': `${CARD_BASE_URL}/cu08.jpg`,
-                'cups_09_圣杯九.jpg': `${CARD_BASE_URL}/cu09.jpg`,
-                'cups_10_圣杯十.jpg': `${CARD_BASE_URL}/cu10.jpg`,
-                'cups_11_圣杯侍从.jpg': `${CARD_BASE_URL}/cupa.jpg`,
-                'cups_12_圣杯骑士.jpg': `${CARD_BASE_URL}/cukn.jpg`,
-                'cups_13_圣杯王后.jpg': `${CARD_BASE_URL}/cuqu.jpg`,
-                'cups_14_圣杯国王.jpg': `${CARD_BASE_URL}/cuki.jpg`,
-                'swords_01_宝剑王牌.jpg': `${CARD_BASE_URL}/swac.jpg`,
-                'swords_02_宝剑二.jpg': `${CARD_BASE_URL}/sw02.jpg`,
-                'swords_03_宝剑三.jpg': `${CARD_BASE_URL}/sw03.jpg`,
-                'swords_04_宝剑四.jpg': `${CARD_BASE_URL}/sw04.jpg`,
-                'swords_05_宝剑五.jpg': `${CARD_BASE_URL}/sw05.jpg`,
-                'swords_06_宝剑六.jpg': `${CARD_BASE_URL}/sw06.jpg`,
-                'swords_07_宝剑七.jpg': `${CARD_BASE_URL}/sw07.jpg`,
-                'swords_08_宝剑八.jpg': `${CARD_BASE_URL}/sw08.jpg`,
-                'swords_09_宝剑九.jpg': `${CARD_BASE_URL}/sw09.jpg`,
-                'swords_10_宝剑十.jpg': `${CARD_BASE_URL}/sw10.jpg`,
-                'swords_11_宝剑侍从.jpg': `${CARD_BASE_URL}/swpa.jpg`,
-                'swords_12_宝剑骑士.jpg': `${CARD_BASE_URL}/swkn.jpg`,
-                'swords_13_宝剑王后.jpg': `${CARD_BASE_URL}/swqu.jpg`,
-                'swords_14_宝剑国王.jpg': `${CARD_BASE_URL}/swki.jpg`,
-                'pents_01_星币王牌.jpg': `${CARD_BASE_URL}/peac.jpg`,
-                'pents_02_星币二.jpg': `${CARD_BASE_URL}/pe02.jpg`,
-                'pents_03_星币三.jpg': `${CARD_BASE_URL}/pe03.jpg`,
-                'pents_04_星币四.jpg': `${CARD_BASE_URL}/pe04.jpg`,
-                'pents_05_星币五.jpg': `${CARD_BASE_URL}/pe05.jpg`,
-                'pents_06_星币六.jpg': `${CARD_BASE_URL}/pe06.jpg`,
-                'pents_07_星币七.jpg': `${CARD_BASE_URL}/pe07.jpg`,
-                'pents_08_星币八.jpg': `${CARD_BASE_URL}/pe08.jpg`,
-                'pents_09_星币九.jpg': `${CARD_BASE_URL}/pe09.jpg`,
-                'pents_10_星币十.jpg': `${CARD_BASE_URL}/pe10.jpg`,
-                'pents_11_星币侍从.jpg': `${CARD_BASE_URL}/pepa.jpg`,
-                'pents_12_星币骑士.jpg': `${CARD_BASE_URL}/pekn.jpg`,
-                'pents_13_星币王后.jpg': `${CARD_BASE_URL}/pequ.jpg`,
-                'pents_14_星币国王.jpg': `${CARD_BASE_URL}/peki.jpg`
-            };
+            // 打乱顺序
+            for (let i = unloaded.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [unloaded[i], unloaded[j]] = [unloaded[j], unloaded[i]];
+            }
             
-            // 加载所有图片
-            for (const [fileName, url] of Object.entries(imageUrls)) {
+            return unloaded.slice(0, count);
+        }
+        
+        // 加载指定数量的随机卡牌
+        async function loadRandomCards(count = 10) {
+            const toLoad = getRandomUnloadedCards(count);
+            console.log(`📦 加载 ${toLoad.length} 张新卡牌...`);
+            
+            const promises = toLoad.map(async (fileName) => {
                 try {
+                    const url = ALL_CARD_URLS[fileName];
                     const img = await loadImage(url);
                     cardImages.push(img);
-                    cardImageFiles.push(fileName);  // 保存文件名用于显示卡牌名称
-                    // 同时保存URL用于卡位显示
+                    cardImageFiles.push(fileName);
+                    loadedCardFiles.add(fileName);
                     if (!window.cardImageUrls) window.cardImageUrls = {};
                     window.cardImageUrls[fileName] = url;
+                    return true;
                 } catch (e) {
-                    console.warn(`无法加载图片: ${fileName} (${url})`);
+                    console.warn(`无法加载图片: ${fileName}`);
+                    return false;
                 }
-            }
+            });
+            
+            await Promise.all(promises);
+            console.log(`✅ 当前已加载 ${cardImages.length} 张卡牌`);
+        }
+        
+        async function loadCardImages() {
+            // 初始只加载10张随机卡牌
+            await loadRandomCards(10);
             
             // 如果没有加载到图片，使用占位符
             if (cardImages.length === 0) {
@@ -1387,7 +1430,7 @@
             // 初始化MediaPipe Hands
             hands = new Hands({
                 locateFile: (file) => {
-                    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`;
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
                 }
             });
             
