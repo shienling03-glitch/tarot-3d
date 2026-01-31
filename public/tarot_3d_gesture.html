@@ -408,64 +408,102 @@
         
         /* 移动端适配 */
         @media (max-width: 768px) {
+            /* 隐藏操作提示框 */
+            #info {
+                display: none !important;
+            }
+            
+            /* 隐藏手势状态 */
+            #gesture-status {
+                display: none !important;
+            }
+            
+            /* 隐藏FPS计数器 */
+            #fps-counter {
+                display: none !important;
+            }
+            
+            /* 隐藏下方GIF */
+            #bottom-gif {
+                display: none !important;
+            }
+            
+            /* 缩小上方三张卡位 */
+            #card-slots-container {
+                gap: 10px;
+                top: 15px;
+            }
+            
+            .card-slot {
+                width: 70px !important;
+                height: 98px !important;
+            }
+            
+            .card-slot-label {
+                font-size: 10px;
+                top: -20px;
+            }
+            
+            .card-slot-name {
+                font-size: 10px;
+                bottom: -22px;
+            }
+            
+            .card-slot-name-top {
+                font-size: 8px;
+                top: -18px;
+            }
+            
             #card-slots-container.analysis-mode {
-                top: 60px;
+                top: 40px;
+                gap: 15px;
             }
             
             #card-slots-container.analysis-mode .card-slot {
-                width: 100px !important;
-                height: 140px !important;
+                width: 90px !important;
+                height: 126px !important;
             }
             
             #analysis-panel {
-                top: 280px;
-                max-height: calc(100vh - 300px);
-                padding: 20px;
+                top: 220px;
+                max-height: calc(100vh - 240px);
+                padding: 15px;
                 width: 95%;
             }
             
             .analysis-title {
-                font-size: 20px;
-                margin-bottom: 15px;
+                font-size: 18px;
+                margin-bottom: 12px;
             }
             
             .card-analysis {
                 min-width: 100%;
-                padding: 10px;
+                padding: 8px;
             }
             
             .card-analysis h3 {
-                font-size: 16px;
-            }
-            
-            .card-analysis p {
-                font-size: 13px;
-            }
-            
-            .overall-analysis {
-                padding: 12px;
-            }
-            
-            .overall-analysis h3 {
-                font-size: 18px;
-            }
-            
-            .overall-analysis p {
-                font-size: 13px;
-            }
-            
-            .restart-button {
-                padding: 10px 25px;
                 font-size: 14px;
             }
             
-            #bottom-gif img {
-                width: 120px !important;
+            .card-analysis p {
+                font-size: 12px;
             }
             
-            #bottom-gif.enlarged img {
-                width: 90vw !important;
-                max-width: 400px !important;
+            .overall-analysis {
+                padding: 10px;
+            }
+            
+            .overall-analysis h3 {
+                font-size: 16px;
+            }
+            
+            .overall-analysis p {
+                font-size: 12px;
+            }
+            
+            .restart-button {
+                padding: 8px 20px;
+                font-size: 13px;
             }
         }
     </style>
@@ -553,11 +591,13 @@
         // ========================================
         // 可配置参数
         // ========================================
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
+        
         const CONFIG = {
             CARD_COUNT: 20,              // 卡牌总数（循环队列）
-            CARD_WIDTH: 2.734,           // 卡牌宽度 (2.025 * 1.35)
-            CARD_HEIGHT: 3.827,          // 卡牌高度 (2.835 * 1.35)
-            CARD_SPACING: 1.458,         // 卡牌间距 (1.08 * 1.35)
+            CARD_WIDTH: isMobile ? 1.8 : 2.734,           // 卡牌宽度
+            CARD_HEIGHT: isMobile ? 2.52 : 3.827,          // 卡牌高度
+            CARD_SPACING: isMobile ? 0.9 : 1.458,         // 卡牌间距
             CURSOR_SIZE: 40,             // 光标直径(px)
             PARTICLE_COUNT: 300,         // 粒子数量（会根据设备性能动态调整）
             CARD_DISPLAY_TIME: 2000,     // 卡牌展示时长(ms)
@@ -569,12 +609,11 @@
         
         // 根据设备性能动态调整粒子数量
         function adjustParticleCount() {
-            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
             const isLowEnd = navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4;
             
             if (isMobile || isLowEnd) {
-                CONFIG.PARTICLE_COUNT = 150; // 移动端或低端设备减少粒子
-                console.log('📱 检测到移动/低端设备，粒子数量: 150');
+                CONFIG.PARTICLE_COUNT = 100; // 移动端或低端设备减少粒子
+                console.log('📱 检测到移动/低端设备，粒子数量: 100');
             } else {
                 CONFIG.PARTICLE_COUNT = 300; // 桌面端保持300
                 console.log('💻 桌面设备，粒子数量: 300');
@@ -1057,7 +1096,7 @@
                 0.1,
                 1000
             );
-            camera.position.z = 8;
+            camera.position.z = isMobile ? 6 : 8;
             
             // 创建渲染器
             renderer = new THREE.WebGLRenderer({ antialias: true });
