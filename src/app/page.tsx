@@ -5,6 +5,7 @@ export default function Home() {
         src="/tarot_3d_gesture.html"
         className="w-full h-full border-0"
         title="Tarot 3D Gesture"
+        allow="camera; microphone"
       />
     </main>
   )
