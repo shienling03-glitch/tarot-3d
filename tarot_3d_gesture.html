@@ -1,0 +1,2228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D塔罗牌手势交互系统</title>
+    <!-- 
+    ========================================
+    使用说明：
+    1. 需允许摄像头权限，在光线充足、背景简洁的环境下操作
+    2. 五指张开滑动：展开五指左右移动可滑动卡牌队列
+    3. 单食指选中：仅伸出食指指向卡牌可选中并抽取
+    4. 确保手部完全在摄像头视野内，无遮挡
+    ========================================
+    -->
+    
+    <!-- CDN资源引入 -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1620248357/camera_utils.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.min.js" crossorigin="anonymous"></script>
+    
+    <style>
+        /* ========== 全局样式 ========== */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+            background: #000;
+            color: #fff;
+        }
+        
+        /* ========== 3D渲染容器 ========== */
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            transition: opacity 1s ease-in-out;
+        }
+        
+        #canvas-container.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+        
+        /* ========== 摄像头预览窗口 ========== */
+        #video-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 200px;
+            height: 150px;
+            border: 2px solid rgba(0, 255, 255, 0.5);
+            border-radius: 8px;
+            overflow: hidden;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;  /* 隐藏摄像头预览 */
+        }
+        
+        #video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+        
+        /* ========== 圆环光标 ========== */
+        #cursor {
+            position: fixed;
+            width: 60px;
+            height: 60px;
+            border: 4px solid rgba(0, 255, 255, 1);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 1000;
+            display: none;
+            transform: translate(-50%, -50%);
+            opacity: 1;
+            transition: opacity 0.2s ease-out;
+            /* 使用 transform 而不是 left/top 来获得更好的性能 */
+            will-change: transform;
+            /* 添加发光效果 */
+            box-shadow: 
+                0 0 10px rgba(0, 255, 255, 0.8),
+                0 0 20px rgba(0, 255, 255, 0.6),
+                0 0 30px rgba(0, 255, 255, 0.4),
+                inset 0 0 10px rgba(0, 255, 255, 0.3);
+        }
+        
+        /* 使用伪元素来实现脉冲效果，避免影响主元素的transform */
+        #cursor::before {
+            content: '';
+            position: absolute;
+            top: -4px;
+            left: -4px;
+            right: -4px;
+            bottom: -4px;
+            border: 2px solid rgba(0, 255, 255, 0.4);
+            border-radius: 50%;
+            animation: cursorPulse 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes cursorPulse {
+            0%, 100% {
+                transform: scale(1);
+                opacity: 0.6;
+            }
+            50% {
+                transform: scale(1.2);
+                opacity: 0.2;
+            }
+        }
+        
+        #cursor::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 8px;
+            height: 8px;
+            background: rgba(0, 255, 255, 1);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 8px rgba(0, 255, 255, 1);
+        }
+        
+        /* ========== 提示信息 ========== */
+        #info {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            padding: 15px 20px;
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            border-radius: 8px;
+            z-index: 100;
+            font-size: 14px;
+            line-height: 1.6;
+            max-width: 300px;
+        }
+        
+        #gesture-status {
+            position: fixed;
+            top: 20px;
+            right: 240px;
+            padding: 10px 15px;
+            background: rgba(0, 255, 255, 0.2);
+            border: 1px solid rgba(0, 255, 255, 0.5);
+            border-radius: 8px;
+            z-index: 100;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        
+        /* ========== 加载提示 ========== */
+        #loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 200;
+            font-size: 18px;
+        }
+        
+        .spinner {
+            border: 4px solid rgba(0, 255, 255, 0.3);
+            border-top: 4px solid rgba(0, 255, 255, 1);
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* ========== 错误提示 ========== */
+        .error {
+            color: #ff6b6b;
+            background: rgba(255, 107, 107, 0.1);
+            border-color: rgba(255, 107, 107, 0.5);
+        }
+        
+        /* ========== 上方卡位区域 ========== */
+        #card-slots-container {
+            position: fixed;
+            top: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 20px;
+            z-index: 100;
+            transition: all 1.5s ease-in-out;
+        }
+        
+        #card-slots-container.analysis-mode {
+            top: 80px;
+            transform: translateX(-50%);
+            gap: 40px;
+        }
+        
+        .card-slot {
+            width: 120px;
+            height: 168px;
+            border: 3px solid rgba(255, 255, 255, 0.5);
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.3);
+            position: relative;
+            overflow: hidden;
+            transition: all 1.5s ease-in-out;
+        }
+        
+        #card-slots-container.analysis-mode .card-slot {
+            width: 180px;
+            height: 252px;
+        }
+        
+        .card-slot img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0;
+            transition: opacity 1.5s ease-in-out;
+        }
+        
+        .card-slot.filled img {
+            opacity: 1;
+        }
+        
+        .card-slot-name {
+            position: absolute;
+            bottom: -30px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #00ffff;
+            font-size: 14px;
+            font-weight: bold;
+            text-align: center;
+            white-space: nowrap;
+            text-shadow: 0 0 5px rgba(0, 255, 255, 0.8);
+            opacity: 0;
+            transition: opacity 1.5s ease-in-out;
+        }
+        
+        .card-slot.filled .card-slot-name {
+            opacity: 1;
+        }
+        
+        .card-slot-name-top {
+            position: absolute;
+            top: -25px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #00ffff;
+            font-size: 12px;
+            font-weight: bold;
+            text-align: center;
+            white-space: nowrap;
+            text-shadow: 0 0 5px rgba(0, 255, 255, 0.8);
+            opacity: 0;
+            transition: opacity 1.5s ease-in-out;
+        }
+        
+        .card-slot.filled .card-slot-name-top {
+            opacity: 1;
+        }
+        
+        /* 卡位序号标识 */
+        .card-slot-label {
+            position: absolute;
+            top: -50px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #ffffff;
+            font-size: 16px;
+            font-weight: bold;
+            text-align: center;
+            white-space: nowrap;
+            opacity: 0.7;
+            text-shadow: 0 0 8px rgba(255, 255, 255, 0.6);
+        }
+        
+        /* FPS显示 */
+        #fps-counter {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 8px 12px;
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            border-radius: 5px;
+            color: #00ffff;
+            font-size: 14px;
+            font-family: monospace;
+            z-index: 100;
+        }
+        
+        /* ========== 运势分析面板 ========== */
+        #analysis-panel {
+            position: fixed;
+            top: 380px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 1200px;
+            max-height: calc(100vh - 420px);
+            overflow-y: auto;
+            background: rgba(0, 0, 0, 0.9);
+            border: 2px solid rgba(0, 255, 255, 0.6);
+            border-radius: 15px;
+            padding: 30px;
+            z-index: 200;
+            display: none;
+            opacity: 0;
+            transition: opacity 1s ease-in-out;
+        }
+        
+        #analysis-panel.show {
+            display: block;
+            opacity: 1;
+        }
+        
+        .analysis-title {
+            text-align: center;
+            font-size: 28px;
+            color: #00ffff;
+            margin-bottom: 20px;
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.8);
+        }
+        
+        .analysis-content {
+            display: flex;
+            justify-content: space-around;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .card-analysis {
+            flex: 1;
+            min-width: 250px;
+            text-align: center;
+            padding: 15px;
+        }
+        
+        .card-analysis h3 {
+            color: #00ffff;
+            font-size: 18px;
+            margin-bottom: 8px;
+        }
+        
+        .card-analysis p {
+            color: #ffffff;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        
+        .overall-analysis {
+            background: rgba(0, 255, 255, 0.1);
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            margin-top: 15px;
+        }
+        
+        .overall-analysis h3 {
+            color: #00ffff;
+            font-size: 20px;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        
+        .overall-analysis p {
+            color: #ffffff;
+            font-size: 14px;
+            line-height: 1.8;
+        }
+        
+        .restart-button {
+            display: block;
+            margin: 20px auto 0;
+            padding: 12px 30px;
+            background: rgba(0, 255, 255, 0.2);
+            border: 2px solid #00ffff;
+            border-radius: 8px;
+            color: #00ffff;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .restart-button:hover {
+            background: rgba(0, 255, 255, 0.4);
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.6);
+        }
+        
+        /* 移动端适配 */
+        @media (max-width: 768px) {
+            #card-slots-container.analysis-mode {
+                top: 60px;
+            }
+            
+            #card-slots-container.analysis-mode .card-slot {
+                width: 100px !important;
+                height: 140px !important;
+            }
+            
+            #analysis-panel {
+                top: 280px;
+                max-height: calc(100vh - 300px);
+                padding: 20px;
+                width: 95%;
+            }
+            
+            .analysis-title {
+                font-size: 20px;
+                margin-bottom: 15px;
+            }
+            
+            .card-analysis {
+                min-width: 100%;
+                padding: 10px;
+            }
+            
+            .card-analysis h3 {
+                font-size: 16px;
+            }
+            
+            .card-analysis p {
+                font-size: 13px;
+            }
+            
+            .overall-analysis {
+                padding: 12px;
+            }
+            
+            .overall-analysis h3 {
+                font-size: 18px;
+            }
+            
+            .overall-analysis p {
+                font-size: 13px;
+            }
+            
+            .restart-button {
+                padding: 10px 25px;
+                font-size: 14px;
+            }
+            
+            #bottom-gif img {
+                width: 120px !important;
+            }
+            
+            #bottom-gif.enlarged img {
+                width: 90vw !important;
+                max-width: 400px !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 3D渲染容器 -->
+    <div id="canvas-container"></div>
+    
+    <!-- 上方卡位区域 -->
+    <div id="card-slots-container">
+        <div class="card-slot" id="slot-1">
+            <div class="card-slot-label">过去 Past</div>
+            <div class="card-slot-name-top"></div>
+            <img src="" alt="">
+            <div class="card-slot-name"></div>
+        </div>
+        <div class="card-slot" id="slot-2">
+            <div class="card-slot-label">现在 Present</div>
+            <div class="card-slot-name-top"></div>
+            <img src="" alt="">
+            <div class="card-slot-name"></div>
+        </div>
+        <div class="card-slot" id="slot-3">
+            <div class="card-slot-label">未来 Future</div>
+            <div class="card-slot-name-top"></div>
+            <img src="" alt="">
+            <div class="card-slot-name"></div>
+        </div>
+    </div>
+    
+    <!-- 摄像头预览 -->
+    <div id="video-container">
+        <video id="video" autoplay playsinline></video>
+    </div>
+    
+    <!-- 圆环光标 -->
+    <div id="cursor"></div>
+    
+    <!-- 提示信息 -->
+    <div id="info">
+        <!-- <strong>操作指南：</strong><br> -->
+        🖐️ 五指张开：手动滑动卡牌<br>
+        👆 单食指：停止滑动并选中卡牌<br>
+        🤏 手指捏合：翻转选中的卡牌<br>
+        💡 保持手部在摄像头视野内
+    </div>
+    
+    <!-- 手势状态 -->
+    <div id="gesture-status">等待手势...</div>
+    
+    <!-- FPS计数器 -->
+    <div id="fps-counter">FPS: --</div>
+    
+    <!-- 运势分析面板 -->
+    <div id="analysis-panel">
+        <!-- <h2 class="analysis-title">✨ 塔罗运势解读 ✨</h2> -->
+        <div class="analysis-content">
+            <div class="card-analysis">
+                <h3>过去 - Past</h3>
+                <p id="past-analysis">正在分析...</p>
+            </div>
+            <div class="card-analysis">
+                <h3>现在 - Present</h3>
+                <p id="present-analysis">正在分析...</p>
+            </div>
+            <div class="card-analysis">
+                <h3>未来 - Future</h3>
+                <p id="future-analysis">正在分析...</p>
+            </div>
+        </div>
+        <div class="overall-analysis">
+            <h3>综合运势</h3>
+            <p id="overall-analysis">正在生成综合分析...</p>
+        </div>
+        <button class="restart-button" onclick="restartReading()">重新开始</button>
+    </div>
+    
+    <!-- 加载提示 -->
+    <div id="loading">
+        <div class="spinner"></div>
+        <div>正在初始化...</div>
+    </div>
+
+    <script>
+        // ========================================
+        // 可配置参数
+        // ========================================
+        const CONFIG = {
+            CARD_COUNT: 20,              // 卡牌总数（循环队列）
+            CARD_WIDTH: 2.734,           // 卡牌宽度 (2.025 * 1.35)
+            CARD_HEIGHT: 3.827,          // 卡牌高度 (2.835 * 1.35)
+            CARD_SPACING: 1.458,         // 卡牌间距 (1.08 * 1.35)
+            CURSOR_SIZE: 40,             // 光标直径(px)
+            PARTICLE_COUNT: 300,         // 粒子数量（会根据设备性能动态调整）
+            CARD_DISPLAY_TIME: 2000,     // 卡牌展示时长(ms)
+            AUTO_SLIDE_SPEED: 0,         // 自动滑动速度（已禁用）
+            MANUAL_SLIDE_SPEED: 0.5,     // 手动滑动速度系数（提高到0.5以获得更快的滑动）
+            TARGET_FPS: 60,              // 目标帧率
+            CARD_FOLDER: 'tarot_cards'   // 卡牌文件夹
+        };
+        
+        // 根据设备性能动态调整粒子数量
+        function adjustParticleCount() {
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            const isLowEnd = navigator.hardwareConcurrency && navigator.hardwareConcurrency <= 4;
+            
+            if (isMobile || isLowEnd) {
+                CONFIG.PARTICLE_COUNT = 150; // 移动端或低端设备减少粒子
+                console.log('📱 检测到移动/低端设备，粒子数量: 150');
+            } else {
+                CONFIG.PARTICLE_COUNT = 300; // 桌面端保持300
+                console.log('💻 桌面设备，粒子数量: 300');
+            }
+        }
+        
+        adjustParticleCount();
+        
+        // 卡牌名称映射表
+        const CARD_NAMES = {
+            '00_愚者_The_Fool.jpg': '愚者 The Fool',
+            '01_魔术师_The_Magician.jpg': '魔术师 The Magician',
+            '02_女祭司_The_High_Priestess.jpg': '女祭司 The High Priestess',
+            '03_皇后_The_Empress.jpg': '皇后 The Empress',
+            '04_皇帝_The_Emperor.jpg': '皇帝 The Emperor',
+            '05_教皇_The_Hierophant.jpg': '教皇 The Hierophant',
+            '06_恋人_The_Lovers.jpg': '恋人 The Lovers',
+            '07_战车_The_Chariot.jpg': '战车 The Chariot',
+            '08_力量_Strength.jpg': '力量 Strength',
+            '09_隐士_The_Hermit.jpg': '隐士 The Hermit',
+            '10_命运之轮_Wheel_of_Fortune.jpg': '命运之轮 Wheel of Fortune',
+            '11_正义_Justice.jpg': '正义 Justice',
+            '12_倒吊人_The_Hanged_Man.jpg': '倒吊人 The Hanged Man',
+            '13_死神_Death.jpg': '死神 Death',
+            '14_节制_Temperance.jpg': '节制 Temperance',
+            '15_恶魔_The_Devil.jpg': '恶魔 The Devil',
+            '16_高塔_The_Tower.jpg': '高塔 The Tower',
+            '17_星星_The_Star.jpg': '星星 The Star',
+            '18_月亮_The_Moon.jpg': '月亮 The Moon',
+            '19_太阳_The_Sun.jpg': '太阳 The Sun',
+            '20_审判_Judgement.jpg': '审判 Judgement',
+            '21_世界_The_World.jpg': '世界 The World',
+            'cups_01_圣杯王牌.jpg': '圣杯王牌 Ace of Cups',
+            'cups_02_圣杯二.jpg': '圣杯二 Two of Cups',
+            'cups_03_圣杯三.jpg': '圣杯三 Three of Cups',
+            'cups_04_圣杯四.jpg': '圣杯四 Four of Cups',
+            'cups_05_圣杯五.jpg': '圣杯五 Five of Cups',
+            'cups_06_圣杯六.jpg': '圣杯六 Six of Cups',
+            'cups_07_圣杯七.jpg': '圣杯七 Seven of Cups',
+            'cups_08_圣杯八.jpg': '圣杯八 Eight of Cups',
+            'cups_09_圣杯九.jpg': '圣杯九 Nine of Cups',
+            'cups_10_圣杯十.jpg': '圣杯十 Ten of Cups',
+            'cups_11_圣杯侍从.jpg': '圣杯侍从 Page of Cups',
+            'cups_12_圣杯骑士.jpg': '圣杯骑士 Knight of Cups',
+            'cups_13_圣杯王后.jpg': '圣杯王后 Queen of Cups',
+            'cups_14_圣杯国王.jpg': '圣杯国王 King of Cups',
+            'pents_01_星币王牌.jpg': '星币王牌 Ace of Pentacles',
+            'pents_02_星币二.jpg': '星币二 Two of Pentacles',
+            'pents_03_星币三.jpg': '星币三 Three of Pentacles',
+            'pents_04_星币四.jpg': '星币四 Four of Pentacles',
+            'pents_05_星币五.jpg': '星币五 Five of Pentacles',
+            'pents_06_星币六.jpg': '星币六 Six of Pentacles',
+            'pents_07_星币七.jpg': '星币七 Seven of Pentacles',
+            'pents_08_星币八.jpg': '星币八 Eight of Pentacles',
+            'pents_09_星币九.jpg': '星币九 Nine of Pentacles',
+            'pents_10_星币十.jpg': '星币十 Ten of Pentacles',
+            'pents_11_星币侍从.jpg': '星币侍从 Page of Pentacles',
+            'pents_12_星币骑士.jpg': '星币骑士 Knight of Pentacles',
+            'pents_13_星币王后.jpg': '星币王后 Queen of Pentacles',
+            'pents_14_星币国王.jpg': '星币国王 King of Pentacles',
+            'swords_01_宝剑王牌.jpg': '宝剑王牌 Ace of Swords',
+            'swords_02_宝剑二.jpg': '宝剑二 Two of Swords',
+            'swords_03_宝剑三.jpg': '宝剑三 Three of Swords',
+            'swords_04_宝剑四.jpg': '宝剑四 Four of Swords',
+            'swords_05_宝剑五.jpg': '宝剑五 Five of Swords',
+            'swords_06_宝剑六.jpg': '宝剑六 Six of Swords',
+            'swords_07_宝剑七.jpg': '宝剑七 Seven of Swords',
+            'swords_08_宝剑八.jpg': '宝剑八 Eight of Swords',
+            'swords_09_宝剑九.jpg': '宝剑九 Nine of Swords',
+            'swords_10_宝剑十.jpg': '宝剑十 Ten of Swords',
+            'swords_11_宝剑侍从.jpg': '宝剑侍从 Page of Swords',
+            'swords_12_宝剑骑士.jpg': '宝剑骑士 Knight of Swords',
+            'swords_13_宝剑王后.jpg': '宝剑王后 Queen of Swords',
+            'swords_14_宝剑国王.jpg': '宝剑国王 King of Swords',
+            'wands_01_权杖王牌.jpg': '权杖王牌 Ace of Wands',
+            'wands_02_权杖二.jpg': '权杖二 Two of Wands',
+            'wands_03_权杖三.jpg': '权杖三 Three of Wands',
+            'wands_04_权杖四.jpg': '权杖四 Four of Wands',
+            'wands_05_权杖五.jpg': '权杖五 Five of Wands',
+            'wands_06_权杖六.jpg': '权杖六 Six of Wands',
+            'wands_07_权杖七.jpg': '权杖七 Seven of Wands',
+            'wands_08_权杖八.jpg': '权杖八 Eight of Wands',
+            'wands_09_权杖九.jpg': '权杖九 Nine of Wands',
+            'wands_10_权杖十.jpg': '权杖十 Ten of Wands',
+            'wands_11_权杖侍从.jpg': '权杖侍从 Page of Wands',
+            'wands_12_权杖骑士.jpg': '权杖骑士 Knight of Wands',
+            'wands_13_权杖王后.jpg': '权杖王后 Queen of Wands',
+            'wands_14_权杖国王.jpg': '权杖国王 King of Wands'
+        };
+        
+        // ========================================
+        // 全局变量
+        // ========================================
+        let scene, camera, renderer;
+        let cards = [];
+        let cardImages = [];
+        let cardImageFiles = [];  // 存储图片文件名
+        let selectedCard = null;
+        let hoveredCard = null;
+        let isAnimating = false;
+        let isPinching = false;
+        let hands, videoElement, canvasElement;
+        let cursorElement, gestureStatus;
+        let currentGesture = 'none';
+        let previousGesture = 'none';  // 记录上一次的手势
+        let fingerTipPosition = { x: 0, y: 0 };
+        let smoothedFingerPosition = { x: 0, y: 0 };  // 平滑后的指针位置
+        const SMOOTHING_FACTOR = 0.75;  // 平滑系数（0-1，平衡速度和稳定性）
+        
+        // 手势平滑相关
+        let gestureHistory = [];  // 手势历史记录
+        const GESTURE_HISTORY_SIZE = 3;  // 手势历史大小（用于防抖）
+        let lastStableGesture = 'none';  // 上一个稳定的手势
+        let lastHandX = 0;
+        let handVelocity = 0;
+        let targetVelocity = 0;  // 目标速度
+        let smoothedVelocity = 0;  // 平滑后的速度
+        let autoSlideEnabled = false;  // 禁用自动滑动
+        let particles = [];
+        let flyingCards = [];  // 飞行的卡牌数组
+        let lastFlyCardTime = 0;  // 上次飞卡的时间
+        let cardNameElement = null;  // 卡牌名称显示元素
+        let selectedCardsCount = 0;  // 已选择的卡牌数量
+        let canFlipCard = true;  // 是否可以翻卡
+        let lastFlipTime = 0;  // 上次翻卡的时间
+        const FLIP_COOLDOWN = 2000;  // 翻卡冷却时间（毫秒）
+        let gestureEnabled = true;  // 是否启用手势采集
+        
+        // FPS监控
+        let fps = 0;
+        let frameCount = 0;
+        let lastFpsTime = Date.now();
+        let fpsElement = null;
+        
+        // ========================================
+        // 初始化函数
+        // ========================================
+        async function init() {
+            try {
+                // 加载塔罗牌数据
+                await loadTarotData();
+                
+                // 初始化Three.js场景
+                initThreeJS();
+                
+                // 加载卡牌图片
+                await loadCardImages();
+                
+                // 创建卡牌
+                createCards();
+                
+                // 初始化手势识别
+                await initHandTracking();
+                
+                // 创建卡牌名称显示元素
+                createCardNameElement();
+                
+                // 创建FPS显示元素
+                createFpsCounter();
+                
+                // 隐藏加载提示
+                document.getElementById('loading').style.display = 'none';
+                
+                // 开始渲染循环
+                animate();
+                
+            } catch (error) {
+                console.error('初始化失败:', error);
+                showError('初始化失败: ' + error.message);
+            }
+        }
+        
+        // 创建卡牌名称显示元素
+        function createCardNameElement() {
+            cardNameElement = document.createElement('div');
+            cardNameElement.style.position = 'fixed';
+            cardNameElement.style.bottom = '200px';
+            cardNameElement.style.left = '50%';
+            cardNameElement.style.transform = 'translateX(-50%)';
+            cardNameElement.style.padding = '15px 30px';
+            cardNameElement.style.background = 'rgba(0, 0, 0, 0.8)';
+            cardNameElement.style.border = '2px solid rgba(0, 255, 255, 0.6)';
+            cardNameElement.style.borderRadius = '10px';
+            cardNameElement.style.color = '#00ffff';
+            cardNameElement.style.fontSize = '24px';
+            cardNameElement.style.fontWeight = 'bold';
+            cardNameElement.style.zIndex = '150';
+            cardNameElement.style.display = 'none';
+            cardNameElement.style.textAlign = 'center';
+            cardNameElement.style.textShadow = '0 0 10px rgba(0, 255, 255, 0.8)';
+            document.body.appendChild(cardNameElement);
+        }
+        
+        // 创建FPS计数器
+        function createFpsCounter() {
+            fpsElement = document.getElementById('fps-counter');
+        }
+        
+        // 更新FPS
+        function updateFps() {
+            frameCount++;
+            const currentTime = Date.now();
+            const elapsed = currentTime - lastFpsTime;
+            
+            if (elapsed >= 1000) {
+                fps = Math.round((frameCount * 1000) / elapsed);
+                if (fpsElement) {
+                    fpsElement.textContent = `FPS: ${fps}`;
+                    // 根据FPS改变颜色
+                    if (fps >= 50) {
+                        fpsElement.style.color = '#00ff00'; // 绿色
+                    } else if (fps >= 30) {
+                        fpsElement.style.color = '#ffff00'; // 黄色
+                    } else {
+                        fpsElement.style.color = '#ff0000'; // 红色
+                    }
+                }
+                frameCount = 0;
+                lastFpsTime = currentTime;
+            }
+        }
+        
+        // 显示卡牌名称
+        function showCardName(fileName) {
+            const cardName = CARD_NAMES[fileName] || '未知卡牌';
+            cardNameElement.textContent = cardName;
+            cardNameElement.style.display = 'block';
+        }
+        
+        // 隐藏卡牌名称
+        function hideCardName() {
+            cardNameElement.style.display = 'none';
+        }
+        
+        // 添加卡牌到上方卡位
+        function addCardToSlot(fileName) {
+            if (selectedCardsCount >= 3) return;
+            
+            selectedCardsCount++;
+            const slotId = `slot-${selectedCardsCount}`;
+            const slot = document.getElementById(slotId);
+            
+            if (slot) {
+                const img = slot.querySelector('img');
+                const nameDiv = slot.querySelector('.card-slot-name');
+                const nameTopDiv = slot.querySelector('.card-slot-name-top');
+                
+                // 设置图片路径（使用网络链接）
+                img.src = window.cardImageUrls && window.cardImageUrls[fileName] 
+                    ? window.cardImageUrls[fileName] 
+                    : `${CONFIG.CARD_FOLDER}/${fileName}`;
+                
+                // 设置卡牌名称
+                const cardName = CARD_NAMES[fileName] || '未知卡牌';
+                nameDiv.textContent = cardName;
+                nameTopDiv.textContent = cardName;
+                
+                // 添加filled类触发渐变动画
+                setTimeout(() => {
+                    slot.classList.add('filled');
+                }, 100);
+                
+                // 如果三张卡都选完了，开始分析
+                if (selectedCardsCount === 3) {
+                    setTimeout(() => {
+                        startAnalysis();
+                    }, 2000);
+                }
+            }
+        }
+        
+        // 开始运势分析
+        function startAnalysis() {
+            console.log('开始运势分析');
+            
+            // 隐藏3D卡牌场景
+            document.getElementById('canvas-container').classList.add('hidden');
+            
+            // 隐藏提示信息
+            document.getElementById('info').style.display = 'none';
+            document.getElementById('gesture-status').style.display = 'none';
+            
+            // 将卡位移到中央并放大
+            document.getElementById('card-slots-container').classList.add('analysis-mode');
+            
+            // 1.5秒后显示分析面板
+            setTimeout(() => {
+                showAnalysisPanel();
+            }, 1500);
+        }
+        
+        // 显示分析面板
+        function showAnalysisPanel() {
+            const panel = document.getElementById('analysis-panel');
+            panel.classList.add('show');
+            
+            // 确保数据已加载后再生成分析
+            if (!tarotData || !tarotData.cards) {
+                console.warn('⚠️ 塔罗牌数据尚未加载，使用默认解读');
+            }
+            
+            // 延迟生成分析，确保数据已加载
+            setTimeout(() => {
+                generateAnalysis();
+            }, 500);
+        }
+        
+        // 塔罗牌数据（将在页面加载时从JSON文件加载）
+        let tarotData = null;
+        
+        // 加载塔罗牌数据
+        async function loadTarotData() {
+            try {
+                const response = await fetch('tarot_data.json');
+                tarotData = await response.json();
+                console.log('✅ 塔罗牌数据加载成功');
+            } catch (error) {
+                console.error('❌ 塔罗牌数据加载失败:', error);
+                // 使用默认数据
+                tarotData = { cards: {} };
+            }
+        }
+        
+        // 生成运势分析
+        function generateAnalysis() {
+            // 获取三张卡的文件名并解码URL编码
+            const card1 = decodeURIComponent(document.getElementById('slot-1').querySelector('img').src.split('/').pop());
+            const card2 = decodeURIComponent(document.getElementById('slot-2').querySelector('img').src.split('/').pop());
+            const card3 = decodeURIComponent(document.getElementById('slot-3').querySelector('img').src.split('/').pop());
+            
+            console.log('=== 塔罗牌分析调试信息 ===');
+            console.log('选中的卡牌文件名:');
+            console.log('  卡牌1:', card1);
+            console.log('  卡牌2:', card2);
+            console.log('  卡牌3:', card3);
+            console.log('塔罗牌数据是否加载:', tarotData ? '是' : '否');
+            if (tarotData && tarotData.cards) {
+                console.log('JSON中的卡牌数量:', Object.keys(tarotData.cards).length);
+            }
+            
+            // 从JSON数据中获取卡牌信息
+            const card1Data = tarotData?.cards?.[card1];
+            const card2Data = tarotData?.cards?.[card2];
+            const card3Data = tarotData?.cards?.[card3];
+            
+            console.log('卡牌数据查找结果:');
+            console.log('  卡牌1数据:', card1Data ? '✅ 找到' : '❌ 未找到');
+            console.log('  卡牌2数据:', card2Data ? '✅ 找到' : '❌ 未找到');
+            console.log('  卡牌3数据:', card3Data ? '✅ 找到' : '❌ 未找到');
+            console.log('========================');
+            
+            // 生成过去的分析
+            if (card1Data && card1Data.upright) {
+                const meaning = card1Data.upright.meaning || '';
+                const love = card1Data.upright.love || '';
+                document.getElementById('past-analysis').textContent = 
+                    `【${card1Data.name}】${meaning}${love ? ' 在过去的感情经历中，' + love : ''}`;
+            } else {
+                const cardName = CARD_NAMES[card1] || card1.replace('.jpg', '').replace(/_/g, ' ');
+                document.getElementById('past-analysis').textContent = 
+                    `【${cardName}】代表你的过去经历。这张牌显示了你曾经面对的挑战和获得的经验，这些都在塑造着现在的你。`;
+            }
+            
+            // 生成现在的分析
+            if (card2Data && card2Data.upright) {
+                const meaning = card2Data.upright.meaning || '';
+                const career = card2Data.upright.career || '';
+                document.getElementById('present-analysis').textContent = 
+                    `【${card2Data.name}】${meaning}${career ? ' 在事业方面，' + career : ''}`;
+            } else {
+                const cardName = CARD_NAMES[card2] || card2.replace('.jpg', '').replace(/_/g, ' ');
+                document.getElementById('present-analysis').textContent = 
+                    `【${cardName}】反映了你当前的状态。你正处在一个重要的转折点，需要做出关键的决定。`;
+            }
+            
+            // 生成未来的分析
+            if (card3Data && card3Data.upright) {
+                const meaning = card3Data.upright.meaning || '';
+                const advice = card3Data.upright.advice || '';
+                document.getElementById('future-analysis').textContent = 
+                    `【${card3Data.name}】${meaning}${advice ? ' 建议：' + advice : ''}`;
+            } else {
+                const cardName = CARD_NAMES[card3] || card3.replace('.jpg', '').replace(/_/g, ' ');
+                document.getElementById('future-analysis').textContent = 
+                    `【${cardName}】预示着你的未来发展。保持积极的心态，未来充满了可能性和机遇。`;
+            }
+            
+            // 生成综合分析
+            const keywords1 = card1Data?.keywords?.join('、') || '过去的经历';
+            const keywords2 = card2Data?.keywords?.join('、') || '当前的状态';
+            const keywords3 = card3Data?.keywords?.join('、') || '未来的发展';
+            
+            const name1 = card1Data?.name || CARD_NAMES[card1] || card1.replace('.jpg', '').split('_').pop();
+            const name2 = card2Data?.name || CARD_NAMES[card2] || card2.replace('.jpg', '').split('_').pop();
+            const name3 = card3Data?.name || CARD_NAMES[card3] || card3.replace('.jpg', '').split('_').pop();
+            
+            document.getElementById('overall-analysis').textContent = 
+                `综合来看，你的塔罗牌阵展现了从【${keywords1}】到【${keywords2}】再到【${keywords3}】的完整轨迹。` +
+                `过去的经历塑造了现在的你，而你当前的选择将影响未来的发展。` +
+                `${name1}提醒你回顾过去的经验，${name2}指引你把握当下的机会，` +
+                `${name3}则预示着未来的可能性。` +
+                `记住，塔罗牌只是提供指引和启发，真正的命运掌握在你自己手中。保持信心，勇敢前行！`;
+        }
+        
+        // 重新开始
+        function restartReading() {
+            // 隐藏分析面板
+            const panel = document.getElementById('analysis-panel');
+            panel.classList.remove('show');
+            
+            // 恢复卡位容器到初始状态
+            const slotsContainer = document.getElementById('card-slots-container');
+            slotsContainer.classList.remove('analysis-mode');
+            
+            // 清空所有卡位
+            for (let i = 1; i <= 3; i++) {
+                const slot = document.getElementById(`slot-${i}`);
+                if (slot) {
+                    slot.classList.remove('filled');
+                    const img = slot.querySelector('img');
+                    const nameDiv = slot.querySelector('.card-slot-name');
+                    const nameTopDiv = slot.querySelector('.card-slot-name-top');
+                    img.src = '';
+                    nameDiv.textContent = '';
+                    nameTopDiv.textContent = '';
+                }
+            }
+            
+            // 显示3D卡牌场景
+            document.getElementById('canvas-container').classList.remove('hidden');
+            
+            // 显示提示信息
+            document.getElementById('info').style.display = 'block';
+            document.getElementById('gesture-status').style.display = 'block';
+            
+            // 重置选卡计数
+            selectedCardsCount = 0;
+            
+            // 重置所有卡牌状态
+            cards.forEach(card => {
+                card.userData.isFlipped = false;
+                card.userData.isSelected = false;
+                card.scale.set(1, 1, 1);
+            });
+            
+            // 重置其他状态
+            selectedCard = null;
+            hoveredCard = null;
+            isAnimating = false;
+            isPinching = false;
+            canFlipCard = true;
+            gestureEnabled = true;
+            
+            console.log('✅ 已重新开始，无需重新加载页面');
+        }
+        
+        // ========================================
+        // Three.js场景初始化模块
+        // ========================================
+        function initThreeJS() {
+            // 创建场景
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000);
+            
+            // 创建相机
+            camera = new THREE.PerspectiveCamera(
+                75,
+                window.innerWidth / window.innerHeight,
+                0.1,
+                1000
+            );
+            camera.position.z = 8;
+            
+            // 创建渲染器
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+            
+            // 添加环境光
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(ambientLight);
+            
+            // 添加点光源（白色光）
+            const pointLight = new THREE.PointLight(0xffffff, 0.6, 100);
+            pointLight.position.set(0, 5, 10);
+            scene.add(pointLight);
+            
+            // 创建星空背景
+            createStarField();
+            
+            // 窗口大小调整
+            window.addEventListener('resize', onWindowResize);
+        }
+        
+        // 创建星空背景
+        function createStarField() {
+            const starGeometry = new THREE.BufferGeometry();
+            const starCount = 1000;
+            const positions = new Float32Array(starCount * 3);
+            const colors = new Float32Array(starCount * 3);
+            
+            for (let i = 0; i < starCount * 3; i += 3) {
+                positions[i] = (Math.random() - 0.5) * 100;
+                positions[i + 1] = (Math.random() - 0.5) * 100;
+                positions[i + 2] = (Math.random() - 0.5) * 100;
+                
+                // 随机颜色（白色、青色、紫色）
+                const colorChoice = Math.random();
+                if (colorChoice > 0.7) {
+                    colors[i] = 1;
+                    colors[i + 1] = 1;
+                    colors[i + 2] = 1;
+                } else if (colorChoice > 0.4) {
+                    colors[i] = 0;
+                    colors[i + 1] = 1;
+                    colors[i + 2] = 1;
+                } else {
+                    colors[i] = 0.8;
+                    colors[i + 1] = 0.4;
+                    colors[i + 2] = 1;
+                }
+            }
+            
+            starGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            starGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            
+            const starMaterial = new THREE.PointsMaterial({
+                size: 0.1,
+                transparent: true,
+                opacity: 0.8,
+                vertexColors: true,
+                blending: THREE.AdditiveBlending
+            });
+            
+            const stars = new THREE.Points(starGeometry, starMaterial);
+            scene.add(stars);
+        }
+        
+        // 窗口大小调整
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        
+        // ========================================
+        // 卡牌加载模块
+        // ========================================
+        async function loadCardImages() {
+            // 使用网络图片链接（Rider-Waite塔罗牌）
+            // 图片来源：sacred-texts.com 公开塔罗牌图片
+            const CARD_BASE_URL = 'https://www.sacred-texts.com/tarot/pkt/img';
+            
+            // 网络图片映射：文件名 -> 网络URL
+            const imageUrls = {
+                '00_愚者_The_Fool.jpg': `${CARD_BASE_URL}/ar00.jpg`,
+                '01_魔术师_The_Magician.jpg': `${CARD_BASE_URL}/ar01.jpg`,
+                '02_女祭司_The_High_Priestess.jpg': `${CARD_BASE_URL}/ar02.jpg`,
+                '03_皇后_The_Empress.jpg': `${CARD_BASE_URL}/ar03.jpg`,
+                '04_皇帝_The_Emperor.jpg': `${CARD_BASE_URL}/ar04.jpg`,
+                '05_教皇_The_Hierophant.jpg': `${CARD_BASE_URL}/ar05.jpg`,
+                '06_恋人_The_Lovers.jpg': `${CARD_BASE_URL}/ar06.jpg`,
+                '07_战车_The_Chariot.jpg': `${CARD_BASE_URL}/ar07.jpg`,
+                '08_力量_Strength.jpg': `${CARD_BASE_URL}/ar08.jpg`,
+                '09_隐士_The_Hermit.jpg': `${CARD_BASE_URL}/ar09.jpg`,
+                '10_命运之轮_Wheel_of_Fortune.jpg': `${CARD_BASE_URL}/ar10.jpg`,
+                '11_正义_Justice.jpg': `${CARD_BASE_URL}/ar11.jpg`,
+                '12_倒吊人_The_Hanged_Man.jpg': `${CARD_BASE_URL}/ar12.jpg`,
+                '13_死神_Death.jpg': `${CARD_BASE_URL}/ar13.jpg`,
+                '14_节制_Temperance.jpg': `${CARD_BASE_URL}/ar14.jpg`,
+                '15_恶魔_The_Devil.jpg': `${CARD_BASE_URL}/ar15.jpg`,
+                '16_高塔_The_Tower.jpg': `${CARD_BASE_URL}/ar16.jpg`,
+                '17_星星_The_Star.jpg': `${CARD_BASE_URL}/ar17.jpg`,
+                '18_月亮_The_Moon.jpg': `${CARD_BASE_URL}/ar18.jpg`,
+                '19_太阳_The_Sun.jpg': `${CARD_BASE_URL}/ar19.jpg`,
+                '20_审判_Judgement.jpg': `${CARD_BASE_URL}/ar20.jpg`,
+                '21_世界_The_World.jpg': `${CARD_BASE_URL}/ar21.jpg`,
+                'wands_01_权杖王牌.jpg': `${CARD_BASE_URL}/waac.jpg`,
+                'wands_02_权杖二.jpg': `${CARD_BASE_URL}/wa02.jpg`,
+                'wands_03_权杖三.jpg': `${CARD_BASE_URL}/wa03.jpg`,
+                'wands_04_权杖四.jpg': `${CARD_BASE_URL}/wa04.jpg`,
+                'wands_05_权杖五.jpg': `${CARD_BASE_URL}/wa05.jpg`,
+                'wands_06_权杖六.jpg': `${CARD_BASE_URL}/wa06.jpg`,
+                'wands_07_权杖七.jpg': `${CARD_BASE_URL}/wa07.jpg`,
+                'wands_08_权杖八.jpg': `${CARD_BASE_URL}/wa08.jpg`,
+                'wands_09_权杖九.jpg': `${CARD_BASE_URL}/wa09.jpg`,
+                'wands_10_权杖十.jpg': `${CARD_BASE_URL}/wa10.jpg`,
+                'wands_11_权杖侍从.jpg': `${CARD_BASE_URL}/wapa.jpg`,
+                'wands_12_权杖骑士.jpg': `${CARD_BASE_URL}/wakn.jpg`,
+                'wands_13_权杖王后.jpg': `${CARD_BASE_URL}/waqu.jpg`,
+                'wands_14_权杖国王.jpg': `${CARD_BASE_URL}/waki.jpg`,
+                'cups_01_圣杯王牌.jpg': `${CARD_BASE_URL}/cuac.jpg`,
+                'cups_02_圣杯二.jpg': `${CARD_BASE_URL}/cu02.jpg`,
+                'cups_03_圣杯三.jpg': `${CARD_BASE_URL}/cu03.jpg`,
+                'cups_04_圣杯四.jpg': `${CARD_BASE_URL}/cu04.jpg`,
+                'cups_05_圣杯五.jpg': `${CARD_BASE_URL}/cu05.jpg`,
+                'cups_06_圣杯六.jpg': `${CARD_BASE_URL}/cu06.jpg`,
+                'cups_07_圣杯七.jpg': `${CARD_BASE_URL}/cu07.jpg`,
+                'cups_08_圣杯八.jpg': `${CARD_BASE_URL}/cu08.jpg`,
+                'cups_09_圣杯九.jpg': `${CARD_BASE_URL}/cu09.jpg`,
+                'cups_10_圣杯十.jpg': `${CARD_BASE_URL}/cu10.jpg`,
+                'cups_11_圣杯侍从.jpg': `${CARD_BASE_URL}/cupa.jpg`,
+                'cups_12_圣杯骑士.jpg': `${CARD_BASE_URL}/cukn.jpg`,
+                'cups_13_圣杯王后.jpg': `${CARD_BASE_URL}/cuqu.jpg`,
+                'cups_14_圣杯国王.jpg': `${CARD_BASE_URL}/cuki.jpg`,
+                'swords_01_宝剑王牌.jpg': `${CARD_BASE_URL}/swac.jpg`,
+                'swords_02_宝剑二.jpg': `${CARD_BASE_URL}/sw02.jpg`,
+                'swords_03_宝剑三.jpg': `${CARD_BASE_URL}/sw03.jpg`,
+                'swords_04_宝剑四.jpg': `${CARD_BASE_URL}/sw04.jpg`,
+                'swords_05_宝剑五.jpg': `${CARD_BASE_URL}/sw05.jpg`,
+                'swords_06_宝剑六.jpg': `${CARD_BASE_URL}/sw06.jpg`,
+                'swords_07_宝剑七.jpg': `${CARD_BASE_URL}/sw07.jpg`,
+                'swords_08_宝剑八.jpg': `${CARD_BASE_URL}/sw08.jpg`,
+                'swords_09_宝剑九.jpg': `${CARD_BASE_URL}/sw09.jpg`,
+                'swords_10_宝剑十.jpg': `${CARD_BASE_URL}/sw10.jpg`,
+                'swords_11_宝剑侍从.jpg': `${CARD_BASE_URL}/swpa.jpg`,
+                'swords_12_宝剑骑士.jpg': `${CARD_BASE_URL}/swkn.jpg`,
+                'swords_13_宝剑王后.jpg': `${CARD_BASE_URL}/swqu.jpg`,
+                'swords_14_宝剑国王.jpg': `${CARD_BASE_URL}/swki.jpg`,
+                'pents_01_星币王牌.jpg': `${CARD_BASE_URL}/peac.jpg`,
+                'pents_02_星币二.jpg': `${CARD_BASE_URL}/pe02.jpg`,
+                'pents_03_星币三.jpg': `${CARD_BASE_URL}/pe03.jpg`,
+                'pents_04_星币四.jpg': `${CARD_BASE_URL}/pe04.jpg`,
+                'pents_05_星币五.jpg': `${CARD_BASE_URL}/pe05.jpg`,
+                'pents_06_星币六.jpg': `${CARD_BASE_URL}/pe06.jpg`,
+                'pents_07_星币七.jpg': `${CARD_BASE_URL}/pe07.jpg`,
+                'pents_08_星币八.jpg': `${CARD_BASE_URL}/pe08.jpg`,
+                'pents_09_星币九.jpg': `${CARD_BASE_URL}/pe09.jpg`,
+                'pents_10_星币十.jpg': `${CARD_BASE_URL}/pe10.jpg`,
+                'pents_11_星币侍从.jpg': `${CARD_BASE_URL}/pepa.jpg`,
+                'pents_12_星币骑士.jpg': `${CARD_BASE_URL}/pekn.jpg`,
+                'pents_13_星币王后.jpg': `${CARD_BASE_URL}/pequ.jpg`,
+                'pents_14_星币国王.jpg': `${CARD_BASE_URL}/peki.jpg`
+            };
+            
+            // 加载所有图片
+            for (const [fileName, url] of Object.entries(imageUrls)) {
+                try {
+                    const img = await loadImage(url);
+                    cardImages.push(img);
+                    cardImageFiles.push(fileName);  // 保存文件名用于显示卡牌名称
+                    // 同时保存URL用于卡位显示
+                    if (!window.cardImageUrls) window.cardImageUrls = {};
+                    window.cardImageUrls[fileName] = url;
+                } catch (e) {
+                    console.warn(`无法加载图片: ${fileName} (${url})`);
+                }
+            }
+            
+            // 如果没有加载到图片，使用占位符
+            if (cardImages.length === 0) {
+                console.warn('未找到卡牌图片，使用占位符');
+                for (let i = 0; i < 10; i++) {
+                    cardImages.push(createPlaceholderTexture(i));
+                    cardImageFiles.push(`placeholder_${i}`);
+                }
+            }
+        }
+        
+        // 加载单张图片
+        function loadImage(src) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.onload = () => resolve(img);
+                img.onerror = reject;
+                img.src = src;
+            });
+        }
+        
+        // 创建占位符纹理
+        function createPlaceholderTexture(index) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 356;
+            const ctx = canvas.getContext('2d');
+            
+            // 渐变背景
+            const gradient = ctx.createLinearGradient(0, 0, 0, 356);
+            gradient.addColorStop(0, '#1a1a2e');
+            gradient.addColorStop(1, '#16213e');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 256, 356);
+            
+            // 添加星点
+            ctx.fillStyle = '#ffffff';
+            for (let i = 0; i < 50; i++) {
+                const x = Math.random() * 256;
+                const y = Math.random() * 356;
+                const size = Math.random() * 2;
+                ctx.fillRect(x, y, size, size);
+            }
+            
+            // 添加文字
+            ctx.fillStyle = '#00ffff';
+            ctx.font = 'bold 24px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(`塔罗牌 ${index + 1}`, 128, 180);
+            
+            return canvas;
+        }
+        
+        // ========================================
+        // 卡牌创建模块
+        // ========================================
+        function createCards() {
+            const totalWidth = (CONFIG.CARD_WIDTH + CONFIG.CARD_SPACING) * CONFIG.CARD_COUNT;
+            const startX = -totalWidth / 2 + (CONFIG.CARD_WIDTH + CONFIG.CARD_SPACING) / 2;
+            
+            for (let i = 0; i < CONFIG.CARD_COUNT; i++) {
+                const card = createCard(i);
+                const x = startX + i * (CONFIG.CARD_WIDTH + CONFIG.CARD_SPACING);
+                card.position.set(x, 0, 0);
+                card.userData.originalX = x;
+                card.userData.index = i;
+                card.userData.isSelected = false;
+                card.userData.isFlipped = false;  // 初始化翻转状态
+                cards.push(card);
+                scene.add(card);
+            }
+        }
+        
+        // 创建单张卡牌
+        function createCard(index) {
+            const group = new THREE.Group();
+            
+            // 卡牌背面（使用back.png图片）
+            const backGeometry = new THREE.PlaneGeometry(CONFIG.CARD_WIDTH, CONFIG.CARD_HEIGHT);
+            const textureLoader = new THREE.TextureLoader();
+            const backTexture = textureLoader.load('./back.png');
+            const backMaterial = new THREE.MeshStandardMaterial({
+                map: backTexture,
+                side: THREE.DoubleSide
+            });
+            const backMesh = new THREE.Mesh(backGeometry, backMaterial);
+            backMesh.position.z = 0.01;
+            group.add(backMesh);
+            
+            // 卡牌正面（随机选择tarot_cards中的图片）
+            const frontGeometry = new THREE.PlaneGeometry(CONFIG.CARD_WIDTH, CONFIG.CARD_HEIGHT);
+            const randomIndex = Math.floor(Math.random() * cardImages.length);
+            const texture = new THREE.CanvasTexture(cardImages[randomIndex]);
+            const frontMaterial = new THREE.MeshStandardMaterial({
+                map: texture,
+                side: THREE.DoubleSide
+            });
+            const frontMesh = new THREE.Mesh(frontGeometry, frontMaterial);
+            frontMesh.rotation.y = Math.PI;
+            frontMesh.position.z = -0.01;
+            group.add(frontMesh);
+            
+            // 卡牌边框
+            const edgesGeometry = new THREE.EdgesGeometry(backGeometry);
+            const edgesMaterial = new THREE.LineBasicMaterial({ 
+                color: 0x00ffff, 
+                linewidth: 2,
+                transparent: true,
+                opacity: 0
+            });
+            const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+            group.add(edges);
+            
+            // 添加发光效果（点光源）
+            const glowLight = new THREE.PointLight(0x00ffff, 0, 5);
+            glowLight.position.set(0, 0, 0.5);
+            group.add(glowLight);
+            
+            group.userData.backMesh = backMesh;
+            group.userData.frontMesh = frontMesh;
+            group.userData.edges = edges;
+            group.userData.glowLight = glowLight;
+            group.userData.imageIndex = randomIndex;
+            group.userData.imageFileName = cardImageFiles[randomIndex];  // 保存文件名
+            group.userData.isFlipped = false;  // 标记卡牌是否已翻转
+            
+            return group;
+        }
+        
+        // ========================================
+        // 手势识别模块
+        // ========================================
+        async function initHandTracking() {
+            cursorElement = document.getElementById('cursor');
+            gestureStatus = document.getElementById('gesture-status');
+            videoElement = document.getElementById('video');
+            
+            // 请求摄像头权限
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: 640, 
+                        height: 480,
+                        facingMode: 'user'
+                    } 
+                });
+                videoElement.srcObject = stream;
+                
+                // 等待视频加载
+                await new Promise((resolve) => {
+                    videoElement.onloadedmetadata = () => {
+                        videoElement.play();
+                        resolve();
+                    };
+                });
+            } catch (error) {
+                throw new Error('无法访问摄像头，请检查权限设置');
+            }
+            
+            // 初始化MediaPipe Hands
+            hands = new Hands({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`;
+                }
+            });
+            
+            hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 0,  // 降低到0以获得更快的初始化和响应
+                minDetectionConfidence: 0.6,  // 降低阈值以提高响应速度
+                minTrackingConfidence: 0.6   // 降低阈值以提高响应速度
+            });
+            
+            hands.onResults(onHandResults);
+            
+            // 预热模型 - 发送几帧空白图像让模型提前加载
+            console.log('正在预热手势识别模型...');
+            for (let i = 0; i < 3; i++) {
+                if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
+                    await hands.send({ image: videoElement });
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+            }
+            console.log('手势识别已就绪！');
+            
+            // 使用requestAnimationFrame代替Camera类
+            async function detectHands() {
+                if (videoElement.readyState === videoElement.HAVE_ENOUGH_DATA) {
+                    await hands.send({ image: videoElement });
+                }
+                requestAnimationFrame(detectHands);
+            }
+            
+            detectHands();
+        }
+        
+        // 手势识别结果处理
+        function onHandResults(results) {
+            // 如果手势被禁用，不处理任何手势
+            if (!gestureEnabled) {
+                cursorElement.style.display = 'none';
+                gestureStatus.textContent = '⏸️ 手势暂停中...';
+                return;
+            }
+            
+            if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+                previousGesture = currentGesture;
+                currentGesture = 'none';
+                cursorElement.style.display = 'none';
+                gestureStatus.textContent = '等待手势...';
+                // 重置平滑状态
+                smoothedFingerPosition = { x: 0, y: 0 };
+                return;
+            }
+            
+            const landmarks = results.multiHandLandmarks[0];
+            
+            // 检测手势类型
+            previousGesture = currentGesture;
+            const gesture = detectGesture(landmarks);
+            currentGesture = gesture;
+            
+            // 更新食指指尖位置（原始位置）
+            const indexTip = landmarks[8]; // 食指指尖
+            const rawX = (1 - indexTip.x) * window.innerWidth;
+            const rawY = indexTip.y * window.innerHeight;
+            
+            // 简单的指数移动平均（EMA）平滑，保持移动幅度
+            if (smoothedFingerPosition.x === 0 && smoothedFingerPosition.y === 0) {
+                // 首次初始化
+                smoothedFingerPosition.x = rawX;
+                smoothedFingerPosition.y = rawY;
+            } else {
+                // 快速平滑过渡
+                smoothedFingerPosition.x += (rawX - smoothedFingerPosition.x) * SMOOTHING_FACTOR;
+                smoothedFingerPosition.y += (rawY - smoothedFingerPosition.y) * SMOOTHING_FACTOR;
+            }
+            
+            // 更新最终位置
+            fingerTipPosition.x = smoothedFingerPosition.x;
+            fingerTipPosition.y = smoothedFingerPosition.y;
+            
+            // 更新光标位置（五指张开时隐藏，其他时候显示）
+            if (gesture === 'open') {
+                cursorElement.style.display = 'none';
+            } else if (gesture === 'point' || gesture === 'pinch') {
+                cursorElement.style.display = 'block';
+                // 使用 transform 而不是 left/top 以获得更好的性能和平滑度
+                cursorElement.style.transform = `translate(${fingerTipPosition.x}px, ${fingerTipPosition.y}px) translate(-50%, -50%)`;
+            } else {
+                cursorElement.style.display = 'block';
+                cursorElement.style.transform = `translate(${fingerTipPosition.x}px, ${fingerTipPosition.y}px) translate(-50%, -50%)`;
+            }
+            
+            // 更新手势状态显示
+            updateGestureStatus(gesture);
+            
+            // 处理手势交互
+            handleGestureInteraction(gesture, landmarks);
+        }
+        
+        // 检测手势类型
+        function detectGesture(landmarks) {
+            // 获取关键点
+            const thumb = landmarks[4];
+            const index = landmarks[8];
+            const middle = landmarks[12];
+            const ring = landmarks[16];
+            const pinky = landmarks[20];
+            const wrist = landmarks[0];
+            
+            // 计算手指是否伸直
+            const isThumbUp = thumb.y < landmarks[3].y;
+            const isIndexUp = index.y < landmarks[6].y;
+            const isMiddleUp = middle.y < landmarks[10].y;
+            const isRingUp = ring.y < landmarks[14].y;
+            const isPinkyUp = pinky.y < landmarks[18].y;
+            
+            // 计算拇指和食指距离（捏合检测）- 提高灵敏度
+            const thumbIndexDist = Math.sqrt(
+                Math.pow(thumb.x - index.x, 2) + 
+                Math.pow(thumb.y - index.y, 2) + 
+                Math.pow(thumb.z - index.z, 2)
+            );
+            
+            // 手指捏合（拇指和食指靠近）- 放宽阈值到0.15以提高灵敏度
+            if (thumbIndexDist < 0.15) {
+                return 'pinch';
+            }
+            
+            // 五指张开
+            if (isThumbUp && isIndexUp && isMiddleUp && isRingUp && isPinkyUp) {
+                return 'open';
+            }
+            
+            // 仅食指伸直（只有一根手指）
+            if (isIndexUp && !isMiddleUp && !isRingUp && !isPinkyUp) {
+                return 'point';
+            }
+            
+            return 'none';
+        }
+        
+        // 更新手势状态显示
+        function updateGestureStatus(gesture) {
+            const statusMap = {
+                'open': '🖐️ 五指张开 - 手动滑动',
+                'point': '👆 单食指 - 选择模式',
+                'pinch': '🤏 捏合 - 翻转卡牌',
+                'none': '等待手势...'
+            };
+            const statusText = statusMap[gesture] || '等待手势...';
+            
+            // 添加翻卡状态提示
+            if (!canFlipCard && gesture === 'pinch') {
+                const remainingTime = Math.ceil((FLIP_COOLDOWN - (Date.now() - lastFlipTime)) / 1000);
+                gestureStatus.textContent = `⏳ 请等待 ${remainingTime} 秒`;
+                gestureStatus.style.background = 'rgba(255, 165, 0, 0.3)';
+            } else {
+                gestureStatus.textContent = statusText;
+                gestureStatus.style.background = 'rgba(0, 255, 255, 0.2)';
+            }
+        }
+        
+        // 处理手势交互
+        function handleGestureInteraction(gesture, landmarks) {
+            if (gesture === 'open') {
+                // 五指张开 - 手动滑动卡牌
+                handleSlideGesture(landmarks);
+                // 恢复所有卡牌大小
+                resetAllCardsScale();
+            } else if (gesture === 'point') {
+                // 单食指 - 控制光标并选中卡牌
+                lastHandX = 0; // 重置手势位置
+                // 平滑减速
+                smoothedVelocity *= 0.85;
+                targetVelocity = 0;
+                handlePointGesture();
+            } else if (gesture === 'pinch') {
+                // 捏合 - 立即翻转卡牌
+                lastHandX = 0; // 重置手势位置
+                // 平滑减速
+                smoothedVelocity *= 0.85;
+                targetVelocity = 0;
+                handlePinchFlipGesture();
+            } else {
+                // 无手势 - 保持静止
+                lastHandX = 0; // 重置手势位置
+                handVelocity = 0; // 清零速度
+                smoothedVelocity = 0; // 清零平滑速度
+                targetVelocity = 0; // 清零目标速度
+                // 即使没有手势，也检测悬停状态
+                hoveredCard = getHoveredCard();
+            }
+        }
+        
+        // 恢复所有卡牌的大小和高亮
+        function resetAllCardsScale() {
+            // 不需要在这里处理，由 updateCardScales 统一处理
+        }
+        
+        // 处理滑动手势
+        function handleSlideGesture(landmarks) {
+            const handX = landmarks[9].x; // 手掌中心
+            
+            // 初始化lastHandX
+            if (lastHandX === 0) {
+                lastHandX = handX;
+                return;
+            }
+            
+            const deltaX = (handX - lastHandX);
+            // 反转方向：手向右移动，卡牌向右滑动（显示左边的卡牌）
+            targetVelocity = -deltaX * CONFIG.MANUAL_SLIDE_SPEED * 200; // 提高响应速度
+            
+            // 使用指数平滑来过渡速度，使滑动更丝滑
+            const smoothingFactor = 0.3; // 平滑系数，越小越平滑但响应稍慢
+            smoothedVelocity += (targetVelocity - smoothedVelocity) * smoothingFactor;
+            
+            // 使用平滑后的速度
+            handVelocity = smoothedVelocity;
+            
+            // 滑动所有卡牌
+            cards.forEach(card => {
+                card.position.x += handVelocity;
+            });
+            
+            // 检查边界并循环卡牌
+            checkAndLoopCards();
+            
+            // 如果滑动速度够快，触发飞卡效果
+            const currentTime = Date.now();
+            if (Math.abs(handVelocity) > 0.3 && currentTime - lastFlyCardTime > 300) {
+                createFlyingCard();
+                lastFlyCardTime = currentTime;
+            }
+            
+            lastHandX = handX;
+        }
+        
+        // 检查并循环卡牌位置（无缝循环）
+        function checkAndLoopCards() {
+            const cardWidth = CONFIG.CARD_WIDTH + CONFIG.CARD_SPACING;
+            const totalWidth = cardWidth * cards.length;
+            const halfTotal = totalWidth / 2;
+            
+            cards.forEach(card => {
+                // 如果卡牌移出左边界，移到右边
+                if (card.position.x < -halfTotal) {
+                    card.position.x += totalWidth;
+                }
+                // 如果卡牌移出右边界，移到左边
+                else if (card.position.x > halfTotal) {
+                    card.position.x -= totalWidth;
+                }
+            });
+        }
+        
+        // 短暂显示卡牌正面
+        function showCardFrontBriefly(card) {
+            const frontMesh = card.userData.frontMesh;
+            const backMesh = card.userData.backMesh;
+            
+            // 设置正面半透明
+            frontMesh.material.opacity = 0.6;
+            frontMesh.material.transparent = true;
+            backMesh.material.opacity = 0.3;
+            backMesh.material.transparent = true;
+            
+            // 0.8秒后恢复
+            setTimeout(() => {
+                frontMesh.material.opacity = 1;
+                backMesh.material.opacity = 1;
+            }, 800);
+        }
+        
+        // 处理指向手势
+        function handlePointGesture() {
+            // 检测光标是否指向某张卡牌
+            const newHoveredCard = getHoveredCard();
+            hoveredCard = newHoveredCard;
+        }
+        
+        // 处理捏合翻牌手势
+        function handlePinchFlipGesture() {
+            // 必须有悬停的卡牌才能翻转（避免手误）
+            if (!hoveredCard) {
+                console.log('捏合失败：没有悬停在任何卡牌上');
+                return;
+            }
+            
+            // 检测当前光标指向的卡牌
+            const targetCard = hoveredCard;
+            
+            // 如果卡牌已经被翻转过，不能再翻转
+            if (targetCard.userData.isFlipped) {
+                console.log('捏合失败：卡牌已经翻转过');
+                return;
+            }
+            
+            // 如果已经在处理翻牌，不重复触发
+            if (isAnimating) {
+                console.log('捏合失败：正在处理动画');
+                return;
+            }
+            
+            // 检查是否可以翻卡（需要等待冷却时间）
+            if (!canFlipCard) {
+                const remainingTime = Math.ceil((FLIP_COOLDOWN - (Date.now() - lastFlipTime)) / 1000);
+                console.log(`捏合失败：请等待 ${remainingTime} 秒后再翻卡`);
+                // 显示提示
+                gestureStatus.textContent = `⏳ 请等待 ${remainingTime} 秒`;
+                gestureStatus.style.background = 'rgba(255, 0, 0, 0.3)';
+                setTimeout(() => {
+                    gestureStatus.style.background = 'rgba(0, 255, 255, 0.2)';
+                }, 1000);
+                return;
+            }
+            
+            console.log('✅ 捏合成功：开始翻转卡牌');
+            
+            isPinching = true;
+            isAnimating = true;
+            selectedCard = targetCard;
+            hoveredCard = targetCard;
+            
+            // 标记卡牌已翻转
+            targetCard.userData.isFlipped = true;
+            
+            // 禁用手势采集
+            gestureEnabled = false;
+            console.log('🚫 手势采集已暂停（翻卡期间）');
+            
+            // 记录翻卡时间并禁止继续翻卡
+            lastFlipTime = Date.now();
+            canFlipCard = false;
+            
+            // 2秒后允许继续翻卡
+            setTimeout(() => {
+                canFlipCard = true;
+                console.log('✅ 冷却完成，可以继续翻卡');
+            }, FLIP_COOLDOWN);
+            
+            // 立即翻转卡牌（翻转完成后会自动触发星辰效果）
+            flipCardImmediately(selectedCard);
+        }
+        
+        // 立即翻转卡牌
+        function flipCardImmediately(card) {
+            if (!card) return;
+            
+            const startRot = card.rotation.y;
+            const targetRot = startRot + Math.PI;
+            
+            let progress = 0;
+            const flipDuration = 600; // 快速翻转
+            const startTime = Date.now();
+            
+            function animateFlip() {
+                const elapsed = Date.now() - startTime;
+                progress = Math.min(elapsed / flipDuration, 1);
+                
+                const easeProgress = easeOutCubic(progress);
+                
+                // 翻转卡牌
+                card.rotation.y = startRot + (targetRot - startRot) * easeProgress;
+                
+                // 翻转到一半时显示卡牌名称
+                if (progress >= 0.5 && card.userData.imageFileName && !card.userData.nameShown) {
+                    showCardName(card.userData.imageFileName);
+                    card.userData.nameShown = true;
+                }
+                
+                if (progress < 1) {
+                    requestAnimationFrame(animateFlip);
+                } else {
+                    // 翻转完成，1.5秒后变成星辰
+                    isAnimating = false;
+                    setTimeout(() => {
+                        createParticleEffectAndClose(card);
+                    }, 1500);
+                }
+            }
+            
+            animateFlip();
+        }
+        
+        // 获取光标指向的卡牌
+        function getHoveredCard() {
+            const mouse = new THREE.Vector2(
+                (fingerTipPosition.x / window.innerWidth) * 2 - 1,
+                -(fingerTipPosition.y / window.innerHeight) * 2 + 1
+            );
+            
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(mouse, camera);
+            
+            const intersects = raycaster.intersectObjects(cards, true);
+            
+            if (intersects.length > 0) {
+                let obj = intersects[0].object;
+                while (obj.parent && !cards.includes(obj)) {
+                    obj = obj.parent;
+                }
+                return obj;
+            }
+            
+            return null;
+        }
+        
+        // ========================================
+        // 卡牌交互模块
+        // ========================================
+        // 不再需要单独的翻转函数，因为翻转由拉动手势实时控制
+        
+        // ========================================
+        // 粒子特效模块
+        // ========================================
+        function createParticleEffectAndClose(card) {
+            if (!card) return;
+            
+            // 立即恢复手势采集（变星辰时）
+            gestureEnabled = true;
+            console.log('✅ 手势采集已恢复（开始变星辰）');
+            
+            // 隐藏卡牌名称
+            hideCardName();
+            
+            // 添加卡牌到上方卡位
+            if (card.userData.imageFileName) {
+                addCardToSlot(card.userData.imageFileName);
+            }
+            
+            isAnimating = true;
+            
+            const particleGeometry = new THREE.BufferGeometry();
+            const particleCount = CONFIG.PARTICLE_COUNT;
+            const positions = new Float32Array(particleCount * 3);
+            const velocities = [];
+            const colors = new Float32Array(particleCount * 3);
+            
+            // 获取卡牌颜色
+            const cardColor = new THREE.Color(0x00ffff);
+            
+            for (let i = 0; i < particleCount; i++) {
+                // 初始位置（卡牌中心）
+                positions[i * 3] = card.position.x + (Math.random() - 0.5) * CONFIG.CARD_WIDTH * card.scale.x;
+                positions[i * 3 + 1] = card.position.y + (Math.random() - 0.5) * CONFIG.CARD_HEIGHT * card.scale.y;
+                positions[i * 3 + 2] = card.position.z;
+                
+                // 随机速度
+                velocities.push({
+                    x: (Math.random() - 0.5) * 0.08,
+                    y: (Math.random() - 0.5) * 0.08,
+                    z: (Math.random() - 0.5) * 0.08
+                });
+                
+                // 颜色（星辰效果 - 渐变色：白色、青色、紫色、金色）
+                const colorChoice = Math.random();
+                if (colorChoice > 0.7) {
+                    // 白色
+                    colors[i * 3] = 1;
+                    colors[i * 3 + 1] = 1;
+                    colors[i * 3 + 2] = 1;
+                } else if (colorChoice > 0.5) {
+                    // 青色
+                    colors[i * 3] = cardColor.r;
+                    colors[i * 3 + 1] = cardColor.g;
+                    colors[i * 3 + 2] = cardColor.b;
+                } else if (colorChoice > 0.3) {
+                    // 紫色
+                    colors[i * 3] = 0.8;
+                    colors[i * 3 + 1] = 0.4;
+                    colors[i * 3 + 2] = 1.0;
+                } else {
+                    // 金色
+                    colors[i * 3] = 1.0;
+                    colors[i * 3 + 1] = 0.84;
+                    colors[i * 3 + 2] = 0.0;
+                }
+            }
+            
+            particleGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            particleGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            
+            const particleMaterial = new THREE.PointsMaterial({
+                size: 0.08,
+                vertexColors: true,
+                transparent: true,
+                opacity: 1,
+                blending: THREE.AdditiveBlending
+            });
+            
+            const particleSystem = new THREE.Points(particleGeometry, particleMaterial);
+            scene.add(particleSystem);
+            
+            // 记录被移除卡牌的位置
+            const removedCardX = card.position.x;
+            
+            // 移除卡牌
+            scene.remove(card);
+            const cardIndex = cards.indexOf(card);
+            if (cardIndex > -1) {
+                cards.splice(cardIndex, 1);
+            }
+            
+            // 立即在原位置创建新卡牌
+            closeGapAfterRemoval(removedCardX);
+            
+            // 粒子动画
+            let particleProgress = 0;
+            const particleDuration = 3000;
+            const startTime = Date.now();
+            
+            function animateParticles() {
+                const elapsed = Date.now() - startTime;
+                particleProgress = elapsed / particleDuration;
+                
+                const positions = particleGeometry.attributes.position.array;
+                
+                for (let i = 0; i < particleCount; i++) {
+                    positions[i * 3] += velocities[i].x;
+                    positions[i * 3 + 1] += velocities[i].y;
+                    positions[i * 3 + 2] += velocities[i].z;
+                    
+                    // 粒子向上飘散
+                    velocities[i].y += 0.001;
+                }
+                
+                particleGeometry.attributes.position.needsUpdate = true;
+                particleMaterial.opacity = 1 - particleProgress;
+                
+                if (particleProgress < 1) {
+                    requestAnimationFrame(animateParticles);
+                } else {
+                    scene.remove(particleSystem);
+                    particleGeometry.dispose();
+                    particleMaterial.dispose();
+                    
+                    // 重置状态
+                    isAnimating = false;
+                    isPinching = false;
+                    selectedCard = null;
+                    hoveredCard = null;
+                }
+            }
+            
+            animateParticles();
+        }
+        
+        // 移除卡牌后，立即在原位置创建新卡牌
+        function closeGapAfterRemoval(removedX) {
+            // 立即在原位置创建新卡牌
+            const newCard = createCard(cards.length);
+            newCard.position.set(removedX, 0, 0);
+            newCard.userData.index = cards.length;
+            newCard.userData.isSelected = false;
+            newCard.userData.isFlipped = false;  // 新卡牌未翻转
+            
+            // 添加到场景和数组
+            cards.push(newCard);
+            scene.add(newCard);
+            
+            console.log('新卡牌已创建，位置:', removedX);
+        }
+        
+        // 缓动函数
+        function easeOutCubic(t) {
+            return 1 - Math.pow(1 - t, 3);
+        }
+        
+        // ========================================
+        // 飞卡特效模块
+        // ========================================
+        function createFlyingCard() {
+            // 随机选择一张塔罗牌图片
+            const randomIndex = Math.floor(Math.random() * cardImages.length);
+            
+            // 创建飞卡
+            const flyCardGeometry = new THREE.PlaneGeometry(1.5, 2.1);
+            const texture = new THREE.CanvasTexture(cardImages[randomIndex]);
+            const flyCardMaterial = new THREE.MeshStandardMaterial({
+                map: texture,
+                transparent: true,
+                opacity: 0.9,
+                side: THREE.DoubleSide
+            });
+            const flyCard = new THREE.Mesh(flyCardGeometry, flyCardMaterial);
+            
+            // 随机选择起始位置（左侧或右侧）
+            const fromLeft = Math.random() > 0.5;
+            
+            if (fromLeft) {
+                // 从左下角飞向右上角
+                var startX = -15;
+                var startY = -8;
+                var endX = 15;
+                var endY = 8;
+            } else {
+                // 从右下角飞向左上角
+                var startX = 15;
+                var startY = -8;
+                var endX = -15;
+                var endY = 8;
+            }
+            
+            const startZ = 5;
+            const endZ = 8;
+            
+            flyCard.position.set(startX, startY, startZ);
+            
+            // 随机旋转
+            flyCard.rotation.z = (Math.random() - 0.5) * Math.PI * 0.5;
+            
+            scene.add(flyCard);
+            
+            // 飞行动画
+            const flyData = {
+                mesh: flyCard,
+                startTime: Date.now(),
+                duration: 1500,  // 飞行持续时间（增加到1.5秒）
+                startX, startY, startZ,
+                endX, endY, endZ,
+                rotationSpeed: (Math.random() - 0.5) * 0.015
+            };
+            
+            flyingCards.push(flyData);
+        }
+        
+        // 更新飞卡动画
+        function updateFlyingCards() {
+            const currentTime = Date.now();
+            
+            for (let i = flyingCards.length - 1; i >= 0; i--) {
+                const flyData = flyingCards[i];
+                const elapsed = currentTime - flyData.startTime;
+                const progress = Math.min(elapsed / flyData.duration, 1);
+                
+                if (progress >= 1) {
+                    // 动画完成，移除飞卡
+                    scene.remove(flyData.mesh);
+                    flyData.mesh.geometry.dispose();
+                    flyData.mesh.material.dispose();
+                    flyingCards.splice(i, 1);
+                } else {
+                    // 更新位置（使用缓动函数）
+                    const easeProgress = easeOutCubic(progress);
+                    flyData.mesh.position.x = flyData.startX + (flyData.endX - flyData.startX) * easeProgress;
+                    flyData.mesh.position.y = flyData.startY + (flyData.endY - flyData.startY) * easeProgress;
+                    flyData.mesh.position.z = flyData.startZ + (flyData.endZ - flyData.startZ) * easeProgress;
+                    
+                    // 旋转
+                    flyData.mesh.rotation.z += flyData.rotationSpeed;
+                    
+                    // 淡出效果（后半段才开始淡出）
+                    if (progress > 0.6) {
+                        flyData.mesh.material.opacity = 0.9 * (1 - (progress - 0.6) / 0.4);
+                    } else {
+                        flyData.mesh.material.opacity = 0.9;
+                    }
+                }
+            }
+        }
+        
+        // ========================================
+        // 渲染循环
+        // ========================================
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // 更新FPS
+            updateFps();
+            
+            // 更新卡牌缩放动画（平滑过渡）
+            updateCardScales();
+            
+            // 更新飞卡动画
+            updateFlyingCards();
+            
+            // 不再自动滑动卡牌，只有五指张开时才能滑动
+            
+            // 轻微旋转星空
+            if (scene.children[2]) {
+                scene.children[2].rotation.y += 0.0001;
+            }
+            
+            renderer.render(scene, camera);
+        }
+        
+        // 更新所有卡牌的缩放动画
+        function updateCardScales() {
+            cards.forEach(card => {
+                const edges = card.userData.edges;
+                const glowLight = card.userData.glowLight;
+                
+                // 确定目标缩放值
+                let targetScale = 1.0;
+                let targetOpacity = 0;
+                let targetGlowIntensity = 0;
+                let targetZ = 0; // 目标Z轴位置
+                
+                // 只要光标悬停在卡牌上就放大（不限制手势类型）
+                if (card === hoveredCard) {
+                    targetScale = 1.3;
+                    targetOpacity = 1;
+                    targetGlowIntensity = 0.5;
+                    targetZ = 1; // 悬停时稍微向前
+                }
+                
+                // 如果是被翻转的卡牌，放大到220%并增强发光
+                if (card === selectedCard && card.userData.isFlipped) {
+                    targetScale = 2.2;
+                    targetGlowIntensity = 2.0;
+                    targetZ = 0; // 保持原位置
+                }
+                
+                // 平滑插值到目标值
+                card.scale.x += (targetScale - card.scale.x) * 0.15;
+                card.scale.y += (targetScale - card.scale.y) * 0.15;
+                card.scale.z += (targetScale - card.scale.z) * 0.15;
+                
+                // 平滑移动Z轴位置
+                card.position.z += (targetZ - card.position.z) * 0.15;
+                
+                // 更新边框透明度
+                if (edges && edges.material) {
+                    edges.material.opacity += (targetOpacity - edges.material.opacity) * 0.15;
+                }
+                
+                // 更新发光强度
+                if (glowLight) {
+                    glowLight.intensity += (targetGlowIntensity - glowLight.intensity) * 0.15;
+                }
+            });
+        }
+        
+        // ========================================
+        // 错误处理
+        // ========================================
+        function showError(message) {
+            const loading = document.getElementById('loading');
+            loading.innerHTML = `
+                <div style="color: #ff6b6b; font-size: 18px;">
+                    ❌ ${message}
+                </div>
+                <div style="margin-top: 20px; font-size: 14px; color: #aaa;">
+                    请检查：<br>
+                    • 摄像头权限是否允许<br>
+                    • 浏览器是否支持WebGL<br>
+                    • 网络连接是否正常
+                </div>
+            `;
+        }
+        
+        // ========================================
+        // 启动应用
+        // ========================================
+        window.addEventListener('load', init);
+    </script>
+    
+    <!-- 底部装饰GIF -->
+    <div id="bottom-gif" style="
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 50;
+        opacity: 0.8;
+        pointer-events: auto;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    " onclick="toggleGifSize()">
+        <img src="dragonball_gifs/goku-vegeta.gif" alt="Goku vs Vegeta" style="
+            width: 200px;
+            height: auto;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+            transition: all 0.3s ease;
+        ">
+    </div>
+    
+    <script>
+        let isGifEnlarged = false;
+        
+        function toggleGifSize() {
+            const gifContainer = document.getElementById('bottom-gif');
+            const gifImg = gifContainer.querySelector('img');
+            const isMobile = window.innerWidth <= 768;
+            
+            if (!isGifEnlarged) {
+                // 放大 - 移动到屏幕中央
+                gifContainer.style.bottom = '50%';
+                gifContainer.style.left = '50%';
+                gifContainer.style.transform = 'translate(-50%, 50%)';
+                gifContainer.style.zIndex = '300';
+                gifContainer.style.opacity = '1';
+                
+                if (isMobile) {
+                    gifImg.style.width = '90vw';
+                    gifImg.style.maxWidth = '400px';
+                } else {
+                    gifImg.style.width = '600px';
+                }
+                
+                gifImg.style.boxShadow = '0 0 40px rgba(0, 255, 255, 0.8), 0 0 80px rgba(0, 255, 255, 0.4)';
+                isGifEnlarged = true;
+                
+                // 添加提示
+                gifContainer.title = '点击缩小';
+            } else {
+                // 缩小 - 回到底部
+                gifContainer.style.bottom = '20px';
+                gifContainer.style.left = '50%';
+                gifContainer.style.transform = 'translateX(-50%)';
+                gifContainer.style.zIndex = '50';
+                gifContainer.style.opacity = '0.8';
+                
+                if (isMobile) {
+                    gifImg.style.width = '120px';
+                } else {
+                    gifImg.style.width = '200px';
+                }
+                
+                gifImg.style.boxShadow = '0 0 20px rgba(0, 255, 255, 0.5)';
+                isGifEnlarged = false;
+                
+                // 添加提示
+                gifContainer.title = '点击放大';
+            }
+        }
+        
+        // 初始化提示
+        window.addEventListener('load', () => {
+            const gifContainer = document.getElementById('bottom-gif');
+            if (gifContainer) {
+                gifContainer.title = '点击放大';
+            }
+        });
+    </script>
+</body>
+</html>
