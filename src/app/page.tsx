@@ -19,6 +19,13 @@ export default function Home() {
         >
           🃏 Tarot Experience
         </Link>
+        
+        <Link
+          href="/server-test"
+          className="px-8 py-4 bg-gray-800 text-yellow-400 border border-yellow-500 font-bold rounded-full hover:bg-gray-700 transition-colors"
+        >
+          🔧 Server Test
+        </Link>
       </div>
       
       <p className="text-gray-400 text-sm mt-8">
