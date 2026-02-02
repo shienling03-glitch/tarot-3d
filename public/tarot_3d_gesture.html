@@ -366,6 +366,22 @@
             line-height: 1.6;
         }
         
+        /* 卡名高亮样式 */
+        .card-name-highlight {
+            display: inline-block;
+            color: #ffdd00;
+            font-size: 18px;
+            font-weight: bold;
+            padding: 4px 12px;
+            margin: 4px 0;
+            background: linear-gradient(135deg, rgba(255, 221, 0, 0.2), rgba(255, 170, 0, 0.15));
+            border: 2px solid rgba(255, 221, 0, 0.6);
+            border-radius: 8px;
+            text-shadow: 0 0 10px rgba(255, 221, 0, 0.8), 0 0 20px rgba(255, 170, 0, 0.5);
+            box-shadow: 0 0 15px rgba(255, 221, 0, 0.3);
+            letter-spacing: 1px;
+        }
+        
         .overall-analysis {
             background: rgba(0, 255, 255, 0.1);
             border: 1px solid rgba(0, 255, 255, 0.3);
@@ -741,6 +757,7 @@
         let lastFlipTime = 0;  // 上次翻卡的时间
         const FLIP_COOLDOWN = 2000;  // 翻卡冷却时间（毫秒）
         let gestureEnabled = true;  // 是否启用手势采集
+        let waitingForReleaseCard = null;  // 等待放开手势的卡牌
         
         // FPS监控
         let fps = 0;
@@ -861,6 +878,9 @@
                 const nameDiv = slot.querySelector('.card-slot-name');
                 const nameTopDiv = slot.querySelector('.card-slot-name-top');
                 
+                // 存储原始文件名到 data 属性
+                slot.dataset.fileName = fileName;
+                
                 // 设置图片路径（使用网络链接）
                 img.src = window.cardImageUrls && window.cardImageUrls[fileName] 
                     ? window.cardImageUrls[fileName] 
@@ -939,10 +959,10 @@
         
         // 生成运势分析
         function generateAnalysis() {
-            // 获取三张卡的文件名并解码URL编码
-            const card1 = decodeURIComponent(document.getElementById('slot-1').querySelector('img').src.split('/').pop());
-            const card2 = decodeURIComponent(document.getElementById('slot-2').querySelector('img').src.split('/').pop());
-            const card3 = decodeURIComponent(document.getElementById('slot-3').querySelector('img').src.split('/').pop());
+            // 从 data 属性获取文件名
+            const card1 = document.getElementById('slot-1').dataset.fileName || '';
+            const card2 = document.getElementById('slot-2').dataset.fileName || '';
+            const card3 = document.getElementById('slot-3').dataset.fileName || '';
             
             console.log('=== 塔罗牌分析调试信息 ===');
             console.log('选中的卡牌文件名:');
@@ -969,36 +989,36 @@
             if (card1Data && card1Data.upright) {
                 const meaning = card1Data.upright.meaning || '';
                 const love = card1Data.upright.love || '';
-                document.getElementById('past-analysis').textContent = 
-                    `【${card1Data.name}】${meaning}${love ? ' 在过去的感情经历中，' + love : ''}`;
+                document.getElementById('past-analysis').innerHTML = 
+                    `<span class="card-name-highlight">${card1Data.name}</span>${meaning}${love ? ' 在过去的感情经历中，' + love : ''}`;
             } else {
                 const cardName = CARD_NAMES[card1] || card1.replace('.jpg', '').replace(/_/g, ' ');
-                document.getElementById('past-analysis').textContent = 
-                    `【${cardName}】代表你的过去经历。这张牌显示了你曾经面对的挑战和获得的经验，这些都在塑造着现在的你。`;
+                document.getElementById('past-analysis').innerHTML = 
+                    `<span class="card-name-highlight">${cardName}</span>代表你的过去经历。这张牌显示了你曾经面对的挑战和获得的经验，这些都在塑造着现在的你。`;
             }
             
             // 生成现在的分析
             if (card2Data && card2Data.upright) {
                 const meaning = card2Data.upright.meaning || '';
                 const career = card2Data.upright.career || '';
-                document.getElementById('present-analysis').textContent = 
-                    `【${card2Data.name}】${meaning}${career ? ' 在事业方面，' + career : ''}`;
+                document.getElementById('present-analysis').innerHTML = 
+                    `<span class="card-name-highlight">${card2Data.name}</span>${meaning}${career ? ' 在事业方面，' + career : ''}`;
             } else {
                 const cardName = CARD_NAMES[card2] || card2.replace('.jpg', '').replace(/_/g, ' ');
-                document.getElementById('present-analysis').textContent = 
-                    `【${cardName}】反映了你当前的状态。你正处在一个重要的转折点，需要做出关键的决定。`;
+                document.getElementById('present-analysis').innerHTML = 
+                    `<span class="card-name-highlight">${cardName}</span>反映了你当前的状态。你正处在一个重要的转折点，需要做出关键的决定。`;
             }
             
             // 生成未来的分析
             if (card3Data && card3Data.upright) {
                 const meaning = card3Data.upright.meaning || '';
                 const advice = card3Data.upright.advice || '';
-                document.getElementById('future-analysis').textContent = 
-                    `【${card3Data.name}】${meaning}${advice ? ' 建议：' + advice : ''}`;
+                document.getElementById('future-analysis').innerHTML = 
+                    `<span class="card-name-highlight">${card3Data.name}</span>${meaning}${advice ? ' 建议：' + advice : ''}`;
             } else {
                 const cardName = CARD_NAMES[card3] || card3.replace('.jpg', '').replace(/_/g, ' ');
-                document.getElementById('future-analysis').textContent = 
-                    `【${cardName}】预示着你的未来发展。保持积极的心态，未来充满了可能性和机遇。`;
+                document.getElementById('future-analysis').innerHTML = 
+                    `<span class="card-name-highlight">${cardName}</span>预示着你的未来发展。保持积极的心态，未来充满了可能性和机遇。`;
             }
             
             // 生成综合分析
@@ -1010,11 +1030,11 @@
             const name2 = card2Data?.name || CARD_NAMES[card2] || card2.replace('.jpg', '').split('_').pop();
             const name3 = card3Data?.name || CARD_NAMES[card3] || card3.replace('.jpg', '').split('_').pop();
             
-            document.getElementById('overall-analysis').textContent = 
+            document.getElementById('overall-analysis').innerHTML = 
                 `综合来看，你的塔罗牌阵展现了从【${keywords1}】到【${keywords2}】再到【${keywords3}】的完整轨迹。` +
                 `过去的经历塑造了现在的你，而你当前的选择将影响未来的发展。` +
-                `${name1}提醒你回顾过去的经验，${name2}指引你把握当下的机会，` +
-                `${name3}则预示着未来的可能性。` +
+                `<span class="card-name-highlight">${name1}</span>提醒你回顾过去的经验，<span class="card-name-highlight">${name2}</span>指引你把握当下的机会，` +
+                `<span class="card-name-highlight">${name3}</span>则预示着未来的可能性。` +
                 `记住，塔罗牌只是提供指引和启发，真正的命运掌握在你自己手中。保持信心，勇敢前行！`;
         }
         
@@ -1033,6 +1053,7 @@
                 const slot = document.getElementById(`slot-${i}`);
                 if (slot) {
                     slot.classList.remove('filled');
+                    slot.dataset.fileName = '';  // 清除文件名
                     const img = slot.querySelector('img');
                     const nameDiv = slot.querySelector('.card-slot-name');
                     const nameTopDiv = slot.querySelector('.card-slot-name-top');
@@ -1549,16 +1570,14 @@
             fingerTipPosition.x = smoothedFingerPosition.x;
             fingerTipPosition.y = smoothedFingerPosition.y;
             
-            // 更新光标位置（五指张开时隐藏，其他时候显示）
-            if (gesture === 'open') {
-                cursorElement.style.display = 'none';
-            } else if (gesture === 'point' || gesture === 'pinch') {
+            // 更新光标位置（只有食指手势时显示光标）
+            if (gesture === 'point') {
                 cursorElement.style.display = 'block';
                 // 使用 transform 而不是 left/top 以获得更好的性能和平滑度
                 cursorElement.style.transform = `translate(${fingerTipPosition.x}px, ${fingerTipPosition.y}px) translate(-50%, -50%)`;
             } else {
-                cursorElement.style.display = 'block';
-                cursorElement.style.transform = `translate(${fingerTipPosition.x}px, ${fingerTipPosition.y}px) translate(-50%, -50%)`;
+                // 捏合、五指张开或无手势时隐藏光标
+                cursorElement.style.display = 'none';
             }
             
             // 更新手势状态显示
@@ -1585,26 +1604,26 @@
             const isRingUp = ring.y < landmarks[14].y;
             const isPinkyUp = pinky.y < landmarks[18].y;
             
-            // 计算拇指和食指距离（捏合检测）- 提高灵敏度
+            // 计算拇指和食指距离（捏合检测）
             const thumbIndexDist = Math.sqrt(
                 Math.pow(thumb.x - index.x, 2) + 
                 Math.pow(thumb.y - index.y, 2) + 
                 Math.pow(thumb.z - index.z, 2)
             );
             
-            // 手指捏合（拇指和食指靠近）- 放宽阈值到0.15以提高灵敏度
-            if (thumbIndexDist < 0.15) {
-                return 'pinch';
-            }
-            
-            // 五指张开
+            // 五指张开（优先检测）
             if (isThumbUp && isIndexUp && isMiddleUp && isRingUp && isPinkyUp) {
                 return 'open';
             }
             
-            // 仅食指伸直（只有一根手指）
-            if (isIndexUp && !isMiddleUp && !isRingUp && !isPinkyUp) {
+            // 食指指向（食指伸出，中指、无名指、小指弯曲，且拇指食指距离较远）
+            if (isIndexUp && !isMiddleUp && !isRingUp && !isPinkyUp && thumbIndexDist > 0.08) {
                 return 'point';
+            }
+            
+            // 手指捏合（拇指和食指非常靠近）- 收紧阈值到0.08
+            if (thumbIndexDist < 0.08) {
+                return 'pinch';
             }
             
             return 'none';
@@ -1633,6 +1652,15 @@
         
         // 处理手势交互
         function handleGestureInteraction(gesture, landmarks) {
+            // 检测从捏合变成非捏合，触发星辰效果
+            if (waitingForReleaseCard && previousGesture === 'pinch' && gesture !== 'pinch') {
+                console.log('✅ 检测到放开手势，触发星辰效果');
+                const cardToTransform = waitingForReleaseCard;
+                waitingForReleaseCard = null;
+                createParticleEffectAndClose(cardToTransform);
+                return;
+            }
+            
             if (gesture === 'open') {
                 // 五指张开 - 手动滑动卡牌
                 handleSlideGesture(landmarks);
@@ -1752,6 +1780,12 @@
         
         // 处理捏合翻牌手势
         function handlePinchFlipGesture() {
+            // 必须从食指手势变成捏合才能翻牌
+            if (previousGesture !== 'point') {
+                console.log('捏合失败：需要先用食指选中卡牌');
+                return;
+            }
+            
             // 必须有悬停的卡牌才能翻转（避免手误）
             if (!hoveredCard) {
                 console.log('捏合失败：没有悬停在任何卡牌上');
@@ -1843,11 +1877,19 @@
                 if (progress < 1) {
                     requestAnimationFrame(animateFlip);
                 } else {
-                    // 翻转完成，1.5秒后变成星辰
+                    // 翻转完成，立即更新到上方小卡
                     isAnimating = false;
-                    setTimeout(() => {
-                        createParticleEffectAndClose(card);
-                    }, 1500);
+                    if (card.userData.imageFileName) {
+                        addCardToSlot(card.userData.imageFileName);
+                    }
+                    // 等待手势从捏合变成放开才触发星辰效果
+                    waitingForReleaseCard = card;
+                    // 强制设置手势状态为 pinch，确保能检测到放开
+                    previousGesture = 'pinch';
+                    currentGesture = 'pinch';
+                    // 恢复手势采集，等待放开
+                    gestureEnabled = true;
+                    console.log('✅ 翻牌完成，已更新小卡，等待放开手势...');
                 }
             }
             
@@ -1894,11 +1936,6 @@
             
             // 隐藏卡牌名称
             hideCardName();
-            
-            // 添加卡牌到上方卡位
-            if (card.userData.imageFileName) {
-                addCardToSlot(card.userData.imageFileName);
-            }
             
             isAnimating = true;
             
