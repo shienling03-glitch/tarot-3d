@@ -37,11 +37,11 @@ const messages: Message[] = [];
 function cleanupInactiveUsers() {
   const now = Date.now();
   const timeout = 30 * 60 * 1000;
-  for (const [id, user] of users) {
+  users.forEach((user, id) => {
     if (now - user.lastSeen > timeout) {
       users.delete(id);
     }
-  }
+  });
 }
 
 export async function GET(request: NextRequest) {
