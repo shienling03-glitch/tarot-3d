@@ -1,4 +1,4 @@
-name: NodeJS with Webpack
+name: Next.js CI/CD
 
 on:
   push:
@@ -7,12 +7,13 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
 
     strategy:
       matrix:
         node-version: [18.x, 20.x, 22.x]
+        # Next.js 14+ 推荐 Node.js 18.17+ 或 20+，保留多版本测试更严谨
 
     steps:
     - uses: actions/checkout@v4
@@ -21,8 +22,17 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: ${{ matrix.node-version }}
+        cache: 'npm' # 自动缓存 node_modules，加速依赖安装
 
-    - name: Build
+    - name: Install dependencies
+      run: npm ci # 替代 npm install，严格按照 package-lock.json 安装，保证一致性
+
+    - name: Build Next.js app
+      run: npm run build # Next.js 核心构建命令，会自动调用内置的 Webpack 配置
+
+    # 可选：增加启动验证，确保构建产物能正常运行
+    - name: Verify app startup
       run: |
-        npm install
-        npx webpack
+        npm run start & # 后台启动服务
+        sleep 5 # 等待服务启动
+        curl -f http://localhost:3000 || exit 1 # 验证服务是否可访问
